@@ -1,12 +1,89 @@
-import { google } from '@ai-sdk/google';
-import { ollama } from 'ollama-ai-provider-v2';
-import { generateText } from 'ai';
 import dotenv from 'dotenv';
+import chalk from 'chalk';
+import { createOpenRouter } from '@openrouter/ai-sdk-provider';
+import { generateText, isLoopFinished } from "ai";
+import type { ModelMessage } from "ai";
+import packageJson from "../package.json" with { type: "json" };
+import { TOOLS } from "./tools";
+import { askTerminal, closeTerminalInput } from "./terminalInput";
 
 dotenv.config()
 
-const { text, usage } = await generateText({
-  model: google('gemini-2.5-flash'), // ollama('llama3.2-latest')
-  prompt: 'Write a vegetarian lasagna recipe for 4 people.',
+/** CONSTANTS */
+export const WORKDIR = process.cwd();
+const openrouter = createOpenRouter({
+  apiKey: process.env.OPENROUTER_API_KEY!,
 });
-console.log(text, usage);
+const MODEL = process.env.MODEL!;
+const SYSTEM_PROMPT = `
+You are an expert coding agent at ${WORKDIR}. 
+Use explore_workspace to find files without reading contents, and read_files when you need to read multiple files. 
+Use searchCode to locate literal text or regex matches before reading relevant files; include only the context needed to identify the code path.
+Use ask_user_input only if a missing fact or material choice blocks a correct implementation and cannot be discovered from the workspace. Do not ask about routine or reversible choices; make a sensible default and proceed. Ask one focused question, with options and a valid default when useful. If interactive input is unavailable, state the blocker and do not retry the prompt.
+Use tools to solve tasks. Act, dont explain.`;
+
+/** AGENT LOOP */
+const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
+  const { text, usage } = await generateText({
+    model: openrouter(MODEL),
+    system: SYSTEM_PROMPT,
+    messages,
+    tools: TOOLS,
+    stopWhen: isLoopFinished(),
+    onToolExecutionStart: ({ toolCall }) => {
+      console.log(chalk.magenta(`Tool started: ${toolCall.toolName} (${toolCall.toolCallId})`));
+      console.log(chalk.gray(`Input: ${JSON.stringify(toolCall.input).slice(0, 500)}`));
+    },
+    onToolExecutionEnd: ({ toolCall, toolExecutionMs, toolOutput }) => {
+      const failed = toolOutput.type === "tool-error";
+      const output = failed ? String(toolOutput.error) : String(toolOutput.output);
+      const status = `Tool ${failed ? "failed" : "completed"}: ${toolCall.toolName} (${toolExecutionMs} ms)`;
+      console.log(failed ? chalk.red(status) : chalk.green(status));
+      console.log(chalk.gray(`Output: ${output.slice(0, 500)}${output.length > 500 ? "..." : ""}`));
+    },
+  });
+  console.log(chalk.yellow(`Usage:\nInput: ${usage.inputTokens}\nOutput: ${usage.outputTokens}\nTotal: ${usage.totalTokens}`));
+  return text;
+};
+
+/** INTERFACE */
+const history: ModelMessage[] = [];
+
+const chat = async (): Promise<void> => {
+  while (true) {
+    let query: string;
+    try {
+      query = await askTerminal(chalk.cyan(" input >> "));
+    } catch (error) {
+      console.log(chalk.red(error instanceof Error ? error.message : String(error)));
+      closeTerminalInput();
+      process.exitCode = 130;
+      return;
+    }
+
+    if (["exit", "quit"].includes(query.trim().toLowerCase())) {
+      console.log(chalk.red("Exiting chat..."));
+      closeTerminalInput();
+      return;
+    }
+
+    history.push({ role: "user", content: query });
+    try {
+      const reply = await agentLoop(history);
+      history.push({ role: "assistant", content: reply });
+      if (reply) console.log(chalk.green(reply));
+    } catch (error) {
+      console.log(chalk.red(error instanceof Error ? error.message : String(error)));
+    }
+    console.log();
+  }
+};
+
+console.log(chalk.gray("  ----------------------------------------"));
+console.log(chalk.bold.cyan("  CorbeAgent"));
+console.log(chalk.gray("  ----------------------------------------"));
+console.log(`${chalk.gray("  Version")}  ${chalk.white(packageJson.version)}`);
+console.log(`${chalk.gray("  LLM")}      ${chalk.white(MODEL)}`);
+console.log(chalk.gray("  ----------------------------------------"));
+console.log();
+void chat();

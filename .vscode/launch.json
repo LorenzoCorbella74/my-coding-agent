@@ -1,10 +1,10 @@
 {
-"version": "0.2.0",
+    "version": "0.2.0",
     "configurations": [
         {
             "type": "node",
             "request": "launch",
-            "name": "Debug REAST API",
+            "name": "Launch...My coding agent",
             "program": "${workspaceFolder}/src/index.ts",
             "args": [],
             "console": "integratedTerminal",
