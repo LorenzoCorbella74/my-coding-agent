@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import path from "path";
 import fs from "fs";
-import { runAskUserInput } from "./tools/ask";
+
 import { executeCommand } from "./tools/commands";
 import { runRead, runReadMany } from "./tools/read";
 import { runEdit } from "./tools/edit";
@@ -143,11 +143,6 @@ export const TOOLS = {
             z.object({ filePath: z.string(), content: z.string() }),
         ),
         execute: async ({ filePath, content }) => runWrite(filePath, content),
-    }),
-    ask_user_input: tool({
-        description: "Ask one concise question only when missing information blocks a correct implementation or a material user preference cannot be inferred. First inspect the workspace for discoverable facts. Do not ask about routine implementation details, reversible low-risk choices, or permission to inspect files; choose a sensible default and proceed. Use options for bounded decisions, and only provide a default that is one of those options.",
-        inputSchema: zodSchema(askUserInputSchema),
-        execute: async ({ question, options, defaultValue }) => runAskUserInput({ question, options: options ?? undefined, defaultValue: defaultValue ?? undefined }),
     }),
     skill_get: tool({
         description: "Load specialized knowledge by name",
