@@ -1,4 +1,5 @@
-import chalk from 'chalk';
+import chalk from "chalk";
+import { withSpinner } from "./spinner";
 import { generateText, isLoopFinished } from "ai";
 import { microCompact, estimateTokens, autoCompact } from "./compact";
 import type { ModelMessage } from "ai";
@@ -7,14 +8,12 @@ import { TOOLS } from "./tools";
 import { askTerminal, closeTerminalInput } from "./terminalInput";
 import { WORKDIR, api, MODEL, CONTEXT_LIMIT } from "./config";
 
-
 const SYSTEM_PROMPT = `
 You are an expert coding agent at ${WORKDIR}. 
 Use explore_workspace to find files without reading contents, and read_files when you need to read multiple files. 
 Use searchCode to locate literal text or regex matches before reading relevant files; include only the context needed to identify the code path.
 Use ask_user_input only if a missing fact or material choice blocks a correct implementation and cannot be discovered from the workspace. Do not ask about routine or reversible choices; make a sensible default and proceed. Ask one focused question, with options and a valid default when useful. If interactive input is unavailable, state the blocker and do not retry the prompt.
 Use tools to solve tasks. Act, dont explain.`;
-
 
 /** AGENT LOOP */
 const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
@@ -24,31 +23,35 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
   console.log(` tokens, ${estTokens}`);
   if (estTokens > CONTEXT_LIMIT) {
     console.log(`compacting at ${estTokens}`);
-    const compacted = await autoCompact(messages);
+    const compacted = await withSpinner("Compressing context", () => autoCompact(messages));
     messages.length = 0;
     messages.push(...compacted);
     console.log(`new tokens, ${estimateTokens(messages)}`);
   }
 
-  const { text, usage } = await generateText({
+  const { text, usage } = await withSpinner("Thinking", async (spinner) => generateText({
     model: api(MODEL),
     system: SYSTEM_PROMPT,
     messages,
     tools: TOOLS,
     stopWhen: isLoopFinished(),
     onToolExecutionStart: ({ toolCall }) => {
+      spinner.stop();
       console.log(chalk.magenta(`Tool started: ${toolCall.toolName} (${toolCall.toolCallId})`));
       console.log(chalk.gray(`Input: ${JSON.stringify(toolCall.input).slice(0, 500)}`));
+      spinner.start(`Running ${toolCall.toolName}`);
     },
     onToolExecutionEnd: ({ toolCall, toolExecutionMs, toolOutput }) => {
+      spinner.stop();
       const failed = toolOutput.type === "tool-error";
       const output = failed ? String(toolOutput.error) : String(toolOutput.output);
       const status = `Tool ${failed ? "failed" : "completed"}: ${toolCall.toolName} (${toolExecutionMs} ms)`;
       console.log(failed ? chalk.red(status) : chalk.green(status));
       console.log(chalk.gray(`Output: ${output.slice(0, 500)}${output.length > 500 ? "..." : ""}`));
+      spinner.start("Thinking");
     },
-  });
-  console.log(chalk.yellow(`Usage:\nInput: ${usage.inputTokens}\nOutput: ${usage.outputTokens}\nTotal: ${usage.totalTokens}`));
+  }));
+  console.log(chalk.yellow(`Usage:\nInput: ${usage.inputTokens} - Output: ${usage.outputTokens} - Total: ${usage.totalTokens}`));
   return text;
 };
 
@@ -72,7 +75,7 @@ const slashCommands: Record<string, SlashCommandHandler> = {
     }
 
     try {
-      const compacted = await autoCompact(history);
+      const compacted = await withSpinner("Compressing context", () => autoCompact(history));
       history.splice(0, history.length, ...compacted);
       console.log(chalk.green("Conversation compressed."));
     } catch (error) {
