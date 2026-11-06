@@ -1,5 +1,5 @@
 import path from "path";
-import { WORKDIR } from "..";
+import { WORKDIR } from "../config";
 import { safePath, MAX_SEARCH_FILE_BYTES, MAX_READ_CHARS, getProjectExclusions, normalizeGlob, isExcludedWorkspacePath } from "../tools";
 import fs from "fs";
 

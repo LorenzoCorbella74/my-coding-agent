@@ -1,20 +1,13 @@
-import dotenv from 'dotenv';
 import chalk from 'chalk';
-import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { generateText, isLoopFinished } from "ai";
+import { microCompact, estimateTokens, autoCompact } from "./compact";
 import type { ModelMessage } from "ai";
 import packageJson from "../package.json" with { type: "json" };
 import { TOOLS } from "./tools";
 import { askTerminal, closeTerminalInput } from "./terminalInput";
+import { WORKDIR, api, MODEL, CONTEXT_LIMIT } from "./config";
 
-dotenv.config()
 
-/** CONSTANTS */
-export const WORKDIR = process.cwd();
-const openrouter = createOpenRouter({
-  apiKey: process.env.OPENROUTER_API_KEY!,
-});
-const MODEL = process.env.MODEL!;
 const SYSTEM_PROMPT = `
 You are an expert coding agent at ${WORKDIR}. 
 Use explore_workspace to find files without reading contents, and read_files when you need to read multiple files. 
@@ -22,10 +15,23 @@ Use searchCode to locate literal text or regex matches before reading relevant f
 Use ask_user_input only if a missing fact or material choice blocks a correct implementation and cannot be discovered from the workspace. Do not ask about routine or reversible choices; make a sensible default and proceed. Ask one focused question, with options and a valid default when useful. If interactive input is unavailable, state the blocker and do not retry the prompt.
 Use tools to solve tasks. Act, dont explain.`;
 
+
 /** AGENT LOOP */
 const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
+
+  microCompact(messages);
+  const estTokens = estimateTokens(messages);
+  console.log(` tokens, ${estTokens}`);
+  if (estTokens > CONTEXT_LIMIT) {
+    console.log(`compacting at ${estTokens}`);
+    const compacted = await autoCompact(messages);
+    messages.length = 0;
+    messages.push(...compacted);
+    console.log(`new tokens, ${estimateTokens(messages)}`);
+  }
+
   const { text, usage } = await generateText({
-    model: openrouter(MODEL),
+    model: api(MODEL),
     system: SYSTEM_PROMPT,
     messages,
     tools: TOOLS,
@@ -48,6 +54,33 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
 
 /** INTERFACE */
 const history: ModelMessage[] = [];
+type SlashCommandHandler = (args: string) => Promise<boolean>;
+
+const exitChat: SlashCommandHandler = async () => {
+  console.log(chalk.red("Exiting chat..."));
+  closeTerminalInput();
+  return true;
+};
+
+const slashCommands: Record<string, SlashCommandHandler> = {
+  "/quit": exitChat,
+  "/exit": exitChat,
+  "/compress": async () => {
+    if (history.length === 0) {
+      console.log(chalk.yellow("Nothing to compress."));
+      return false;
+    }
+
+    try {
+      const compacted = await autoCompact(history);
+      history.splice(0, history.length, ...compacted);
+      console.log(chalk.green("Conversation compressed."));
+    } catch (error) {
+      console.log(chalk.red(error instanceof Error ? error.message : String(error)));
+    }
+    return false;
+  },
+};
 
 const chat = async (): Promise<void> => {
   while (true) {
@@ -62,9 +95,20 @@ const chat = async (): Promise<void> => {
     }
 
     if (["exit", "quit"].includes(query.trim().toLowerCase())) {
-      console.log(chalk.red("Exiting chat..."));
-      closeTerminalInput();
+      await exitChat("");
       return;
+    }
+
+    if (query.trim().startsWith("/")) {
+      const [command = "", ...args] = query.trim().split(/\s+/);
+      const handler = slashCommands[command.toLowerCase()];
+      if (!handler) {
+        console.log(chalk.yellow(`Unknown command: ${command}`));
+      } else if (await handler(args.join(" "))) {
+        return;
+      }
+      console.log();
+      continue;
     }
 
     history.push({ role: "user", content: query });

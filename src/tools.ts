@@ -10,8 +10,8 @@ import { runEdit } from "./tools/edit";
 import { runWrite } from "./tools/write";
 import { runExploreWorkspace } from "./tools/explore";
 import { runSearchCode } from "./tools/search";
+import { WORKDIR } from "./config";
 
-export const WORKDIR = process.cwd();
 export const MAX_READ_CHARS = 50000;
 export const MAX_BATCH_READ_FILES = 20;
 export const MAX_SEARCH_FILE_BYTES = 2_000_000;

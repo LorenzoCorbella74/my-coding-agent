@@ -1,4 +1,4 @@
-import { WORKDIR } from "..";
+import { WORKDIR } from "../config";
 import { spawnSync } from "child_process";
 
 const BLOCKED_COMMANDS = ["rm -rf /", "sudo", "shutdown", "reboot", "> /dev/"];
