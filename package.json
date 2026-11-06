@@ -8,7 +8,7 @@
     "corbeagent": "dist/cli.js"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "tsx --test src/sessionStore.test.ts",
     "dev": "tsx --env-file=.env src/cli.ts",
     "build": "tsc --noEmit -p tsconfig.json && esbuild src/cli.ts --bundle --platform=node --format=esm --packages=external --banner:js=\"#!/usr/bin/env node\" --outfile=dist/cli.js"
   },

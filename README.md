@@ -44,13 +44,23 @@ Per controllare i tipi e generare il bundle in `dist/`:
 npm run build
 ```
 
-Digita `exit` o `quit` per chiudere la sessione. La cronologia resta in memoria e viene persa alla chiusura.
+Le sessioni sono salvate come JSONL in `.corbeagent/sessions/` nel workspace; `.corbeagent/.gitignore` esclude i dati di sessione e il puntatore alla sessione attiva dal versionamento.
 
 ## Funzionamento
 
 All'avvio CorbeAgent mostra nome, versione e modello. Ogni richiesta viene inviata al modello insieme alla cronologia della sessione e ai tool disponibili. Se il modello invoca un tool, il programma registra nome, input, esito e durata; gli output dei log sono limitati a 500 caratteri. A fine risposta mostra l'utilizzo dei token.
 
 Il modello usa `ask_user_input` solo quando manca un'informazione decisiva che non può ricavare dal workspace. I prompt condividono l'input del terminale con la chat; scelte invalide vengono ripetute e i default devono corrispondere a una delle opzioni.
+
+## Sessioni
+
+All'avvio viene ripresa automaticamente l'ultima sessione attiva. I comandi disponibili sono:
+
+- `/new`: crea e attiva una nuova sessione.
+- `/sessions`: elenca le sessioni con ID breve, ultima modifica e anteprima del primo messaggio.
+- `/restore <sessionId>`: riprende una sessione usando l'ID breve mostrato nell'elenco; sono richiesti almeno 8 caratteri.
+- `/compress`: comprime solo la sessione attiva e sostituisce il suo JSONL con il riepilogo; la cronologia originale rimossa non viene conservata.
+- `/quit` e `/exit`: chiudono la chat. Restano supportati anche `quit` ed `exit` senza slash.
 
 ## Tool
 

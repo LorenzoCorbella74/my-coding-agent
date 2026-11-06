@@ -16,7 +16,7 @@ export const MAX_READ_CHARS = 50000;
 export const MAX_BATCH_READ_FILES = 20;
 export const MAX_SEARCH_FILE_BYTES = 2_000_000;
 export const DEFAULT_EXCLUDED_DIRS = new Set([
-    ".git", "node_modules", "dist", "build", "coverage", "out", "target", ".next", ".nuxt", ".cache", ".angular"
+    ".git", ".corbeagent", "node_modules", "dist", "build", "coverage", "out", "target", ".next", ".nuxt", ".cache", ".angular"
 ]);
 
 export const safePath = (p: string) => {
