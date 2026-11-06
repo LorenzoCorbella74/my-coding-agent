@@ -8,13 +8,23 @@ import { TOOLS } from "./tools";
 import { askTerminal, closeTerminalInput } from "./terminalInput";
 import { WORKDIR, api, MODEL, CONTEXT_LIMIT } from "./config";
 import { SessionStore } from "./sessionStore";
+import { SKILLS_DESCRIPTIONS } from "./tools";
 
 const SYSTEM_PROMPT = `
-You are an expert coding agent at ${WORKDIR}. 
+You are CORBE CODE an expert coding agent at ${WORKDIR}. 
 Use explore_workspace to find files without reading contents, and read_files when you need to read multiple files. 
 Use searchCode to locate literal text or regex matches before reading relevant files; include only the context needed to identify the code path.
-Use ask_user_input only if a missing fact or material choice blocks a correct implementation and cannot be discovered from the workspace. Do not ask about routine or reversible choices; make a sensible default and proceed. Ask one focused question, with options and a valid default when useful. If interactive input is unavailable, state the blocker and do not retry the prompt.
-Use tools to solve tasks. Act, dont explain.`;
+
+Use ask_user_input only if a missing fact or material choice blocks a correct implementation and cannot be discovered from the workspace. 
+Do not ask about routine or reversible choices; make a sensible default and proceed. Ask one focused question, with options and a valid default when useful. If interactive input is unavailable, state the blocker and do not retry the prompt.
+
+Use tools to solve tasks. 
+
+Use skill_get for specialized knowledge.
+Skills: 
+${SKILLS_DESCRIPTIONS}
+
+Act, dont explain.`;
 
 const sessionStore = new SessionStore(WORKDIR);
 let activeSession = sessionStore.resumeOrCreate();
@@ -25,7 +35,7 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
 
   microCompact(messages);
   const estTokens = estimateTokens(messages);
-  console.log(` tokens, ${estTokens}`);
+  console.log(chalk.yellow(`Tokens usati finora, ${estTokens}`));
   if (estTokens > CONTEXT_LIMIT) {
     console.log(`compacting at ${estTokens}`);
     const compacted = await withSpinner("Compressing context", () => autoCompact(messages));
@@ -41,6 +51,17 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
     messages,
     tools: TOOLS,
     stopWhen: isLoopFinished(),
+    onStepFinish: ({ toolCalls, providerMetadata }) => {
+      const reasoningDetails = providerMetadata?.openrouter?.reasoning_details;
+      if (Array.isArray(reasoningDetails) && reasoningDetails.length > 0) {
+        spinner.stop();
+        for (const detail of reasoningDetails) {
+          console.log(chalk.gray(`Reasoning details: ${detail.text ?? detail.summary ?? JSON.stringify(detail)}`));
+          console.log()
+        }
+        spinner.start("Thinking...");
+      }
+    },
     onToolExecutionStart: ({ toolCall }) => {
       spinner.stop();
       console.log(chalk.magenta(`Tool started: ${toolCall.toolName} (${toolCall.toolCallId})`));
@@ -57,7 +78,7 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
       spinner.start("Thinking");
     },
   }));
-  console.log(chalk.yellow(`Usage:\nInput: ${usage.inputTokens} - Output: ${usage.outputTokens} - Total: ${usage.totalTokens}`));
+  console.log(chalk.yellow(`Usage: Input: ${usage.inputTokens} - Output: ${usage.outputTokens} - Total: ${usage.totalTokens}`));
   return text;
 };
 
@@ -128,7 +149,7 @@ const chat = async (): Promise<void> => {
   while (true) {
     let query: string;
     try {
-      query = await askTerminal(chalk.cyan(" input >> "));
+      query = await askTerminal(chalk.cyan("YOU > "));
     } catch (error) {
       console.log(chalk.red(error instanceof Error ? error.message : String(error)));
       closeTerminalInput();
@@ -165,7 +186,7 @@ const chat = async (): Promise<void> => {
       const assistantMessage: ModelMessage = { role: "assistant", content: reply };
       history.push(assistantMessage);
       sessionStore.append(activeSession.id, assistantMessage);
-      if (reply) console.log(chalk.green(reply));
+      if (reply) console.log("AI > " + chalk.green(reply));
     } catch (error) {
       console.log(chalk.red(error instanceof Error ? error.message : String(error)));
     }
@@ -173,12 +194,12 @@ const chat = async (): Promise<void> => {
   }
 };
 
-console.log(chalk.gray("  ----------------------------------------"));
-console.log(chalk.bold.cyan("  CorbeAgent"));
-console.log(chalk.gray("  ----------------------------------------"));
+console.log(chalk.gray("  --------------------------------------------------"));
+console.log(chalk.bold.cyan("  Corbe Code - My personal coding assistant"));
+console.log(chalk.gray("  --------------------------------------------------"));
 console.log(`${chalk.gray("  Version")}  ${chalk.white(packageJson.version)}`);
 console.log(`${chalk.gray("  LLM")}      ${chalk.white(MODEL)}`);
 console.log(`${chalk.gray("  Session")}  ${chalk.white(activeSession.id.slice(0, 8))}`);
-console.log(chalk.gray("  ----------------------------------------"));
+console.log(chalk.gray("  --------------------------------------------------"));
 console.log();
 void chat();

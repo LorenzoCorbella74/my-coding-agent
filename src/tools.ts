@@ -11,6 +11,7 @@ import { runWrite } from "./tools/write";
 import { runExploreWorkspace } from "./tools/explore";
 import { runSearchCode } from "./tools/search";
 import { WORKDIR } from "./config";
+import { SkillLoader } from "./skills";
 
 export const MAX_READ_CHARS = 50000;
 export const MAX_BATCH_READ_FILES = 20;
@@ -18,6 +19,10 @@ export const MAX_SEARCH_FILE_BYTES = 2_000_000;
 export const DEFAULT_EXCLUDED_DIRS = new Set([
     ".git", ".corbeagent", "node_modules", "dist", "build", "coverage", "out", "target", ".next", ".nuxt", ".cache", ".angular"
 ]);
+
+
+const SKILLS = new SkillLoader()
+export const SKILLS_DESCRIPTIONS = SKILLS.getDescriptions();
 
 export const safePath = (p: string) => {
     const resolved = path.resolve(WORKDIR, p);
@@ -144,4 +149,9 @@ export const TOOLS = {
         inputSchema: zodSchema(askUserInputSchema),
         execute: async ({ question, options, defaultValue }) => runAskUserInput({ question, options: options ?? undefined, defaultValue: defaultValue ?? undefined }),
     }),
+    skill_get: tool({
+        description: "Load specialized knowledge by name",
+        inputSchema: zodSchema(z.object({ name: z.string() })),
+        execute: async ({ name }) => SKILLS.getContent(name),
+    })
 };
