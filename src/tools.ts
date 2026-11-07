@@ -27,6 +27,7 @@ export const DEFAULT_EXCLUDED_DIRS = new Set([
 
 const SKILLS = new SkillLoader()
 export const SKILLS_DESCRIPTIONS = SKILLS.getDescriptions();
+export const getSkillsTable = () => SKILLS.getTable();
 
 export const safePath = (p: string) => {
     const resolved = path.resolve(WORKDIR, p);
@@ -149,6 +150,7 @@ export const createParentTools = (
     activeSession: Session,
     spinner: ReturnType<typeof createSpinner>,
     approveTools: (tools: string[]) => void,
+    abortSignal?: AbortSignal,
 ) => ({
     ...TOOLS,
     task: tool({
@@ -160,6 +162,6 @@ export const createParentTools = (
                 agent: z.string().optional().describe("Name of a custom agent from the available agents list; omit for a general-purpose subagent"),
             }),
         ),
-        execute: async ({ task, agent }) => runSubagent(task, activeSession, spinner, approveTools, agent === undefined ? undefined : AGENTS.get(agent)),
+        execute: async ({ task, agent }) => runSubagent(task, activeSession, spinner, approveTools, agent === undefined ? undefined : AGENTS.get(agent), abortSignal),
     }),
 });

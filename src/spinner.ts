@@ -1,28 +1,12 @@
-import chalk from 'chalk';
+import { getTerminalUi } from "./terminalUi";
 
 export const createSpinner = () => {
-    const frames = ["|", "/", "-", "\\"];
-    let frame = 0;
-    let label = "";
-    let timer: ReturnType<typeof setInterval> | undefined;
-
-    const render = () => {
-        process.stdout.write(`\r${chalk.cyan(`${frames[frame++ % frames.length]} ${label}`)}`);
-    };
-
     return {
         start(nextLabel: string) {
-            label = nextLabel;
-            if (!timer) {
-                render();
-                timer = setInterval(render, 80);
-            }
+            getTerminalUi().setStatus(nextLabel);
         },
         stop() {
-            if (!timer) return;
-            clearInterval(timer);
-            timer = undefined;
-            process.stdout.write("\r\x1b[2K");
+            getTerminalUi().clearStatus();
         },
     };
 };

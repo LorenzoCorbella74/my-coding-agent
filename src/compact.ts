@@ -52,10 +52,11 @@ export const microCompact = (messages: ModelMessage[]): void => {
         });
 };
 
-export const autoCompact = async (messages: ModelMessage[]):
+export const autoCompact = async (messages: ModelMessage[], abortSignal?: AbortSignal):
     Promise<ModelMessage[]> => {
     const { text } = await generateText({
         model: api.chat(MODEL),
+        ...(abortSignal && { abortSignal }),
         messages: [
             {
                 role: "user",

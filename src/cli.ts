@@ -47,4 +47,9 @@ if (!fs.existsSync(workspace) || !fs.statSync(workspace).isDirectory()) {
 }
 
 process.env.CORBEAGENT_WORKDIR = workspace;
-await import('./index.js');
+try {
+    await import('./index.js');
+} catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+}

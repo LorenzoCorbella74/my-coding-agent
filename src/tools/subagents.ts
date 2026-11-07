@@ -7,6 +7,7 @@ import type { createSpinner } from "../spinner";
 import { askTerminal, getApprovalDecision } from "../terminalInput";
 import { selectAgentTools, type CustomAgent } from "../agents";
 import { readWorkspaceInstructions } from "../workspaceInstructions";
+import { writeMessage } from "../terminalUi";
 
 const MUTATING_TOOLS = ["shell", "edit_file", "write_file"];
 
@@ -16,6 +17,7 @@ export const runSubagent = async (
     spinner: ReturnType<typeof createSpinner>,
     approveTools: (tools: string[]) => void,
     agent?: CustomAgent,
+    abortSignal?: AbortSignal,
 ): Promise<string> => {
     const messages: ModelMessage[] = [{ role: "user", content: prompt }];
     const workspaceInstructions = await readWorkspaceInstructions(WORKDIR);
@@ -28,6 +30,7 @@ export const runSubagent = async (
     ].filter(Boolean).join("\n\n");
     const generate = () => generateText({
         model: api(MODEL),
+        ...(abortSignal && { abortSignal }),
         system,
         messages,
         tools,
@@ -42,16 +45,16 @@ export const runSubagent = async (
             if (Array.isArray(reasoningDetails) && reasoningDetails.length > 0) {
                 spinner.stop();
                 for (const detail of reasoningDetails) {
-                    console.log(chalk.gray(`Reasoning details: ${detail.text ?? detail.summary ?? JSON.stringify(detail)}`));
-                    console.log();
+                    writeMessage(`${chalk.bold.cyan("Reasoning details:")} ${chalk.gray(detail.text ?? detail.summary ?? JSON.stringify(detail))}`);
+                    writeMessage();
                 }
                 spinner.start("Subagent thinking...");
             }
         },
         onToolExecutionStart: ({ toolCall }) => {
             spinner.stop();
-            console.log(chalk.magenta(`Subagent tool started: ${toolCall.toolName} (${toolCall.toolCallId})`));
-            console.log(chalk.gray(`Input: ${JSON.stringify(toolCall.input).slice(0, 100)}`));
+            writeMessage(chalk.magenta(`Subagent tool started: ${toolCall.toolName} (${toolCall.toolCallId})`));
+            writeMessage(chalk.gray(`Input: ${JSON.stringify(toolCall.input).slice(0, 100)}`));
             spinner.start(`Subagent running ${toolCall.toolName}`);
         },
         onToolExecutionEnd: ({ toolCall, toolExecutionMs, toolOutput }) => {
@@ -59,8 +62,8 @@ export const runSubagent = async (
             const failed = toolOutput.type === "tool-error";
             const output = failed ? String(toolOutput.error) : String(toolOutput.output);
             const status = `Subagent tool ${failed ? "failed" : "completed"}: ${toolCall.toolName} (${toolExecutionMs} ms)`;
-            console.log(failed ? chalk.red(status) : chalk.green(status));
-            console.log(chalk.gray(`Output: ${output.slice(0, 100)}${output.length > 100 ? "..." : ""}`));
+            writeMessage(failed ? chalk.red(status) : chalk.green(status));
+            writeMessage(chalk.gray(`Output: ${output.slice(0, 100)}${output.length > 100 ? "..." : ""}`));
             spinner.start("Subagent thinking");
         },
     });
@@ -76,8 +79,8 @@ export const runSubagent = async (
         const approvalResponses = [];
         for (const request of result.content) {
             if (request.type !== "tool-approval-request" || request.isAutomatic) continue;
-            console.log(chalk.yellow(`\nAzione proposta dal subagent: ${request.toolCall.toolName}`));
-            console.log(chalk.gray(JSON.stringify(request.toolCall.input, null, 2)));
+            writeMessage(chalk.yellow(`\nAzione proposta dal subagent: ${request.toolCall.toolName}`));
+            writeMessage(chalk.gray(JSON.stringify(request.toolCall.input, null, 2)));
             spinner.stop();
             const answer = await askTerminal(chalk.cyan("Eseguire? [s]ì / [n]o / [a]ccetta sempre in questo workspace per questa sessione: "));
             spinner.start("Subagent thinking");
@@ -87,7 +90,7 @@ export const runSubagent = async (
                 approveTools(MUTATING_TOOLS);
                 activeSession.approvedTools = MUTATING_TOOLS;
             }
-            if (!approved) console.log(chalk.yellow("Azione rifiutata."));
+            if (!approved) writeMessage(chalk.yellow("Azione rifiutata."));
             approvalResponses.push({
                 type: "tool-approval-response" as const,
                 approvalId: request.approvalId,

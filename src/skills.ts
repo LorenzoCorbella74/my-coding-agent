@@ -44,6 +44,14 @@ export class SkillLoader {
             .join('\n');
     }
 
+    getTable(): string {
+        const escape = (value: string) => value.replaceAll("\\", "\\\\").replaceAll("|", "\\|").replace(/\r?\n/g, " ");
+        const rows = Object.entries(this.skills).map(([name, skill]) =>
+            `| ${escape(name)} | ${escape(skill.meta.description ?? "")} |`
+        );
+        return rows.length ? ["| Nome | Descrizione |", "| --- | --- |", ...rows].join("\n") : "Nessuna skill disponibile.";
+    }
+
     getContent(name: string): string {
         const skill = this.skills[name];
         if (!skill) return `Error: skill ${name} not found`;

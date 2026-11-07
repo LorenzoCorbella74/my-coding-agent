@@ -4,7 +4,7 @@ Corbe Code è un coding agent da terminale, realizzato in TypeScript con Vercel 
 
 ## Configurazione
 
-Richiede Node.js 22 o successivo e npm. Crea un file `.env` nella directory da cui lancerai CorbeAgent:
+Richiede Node.js 22.19 o successivo, npm e un terminale interattivo. Crea un file `.env` nella directory da cui lancerai CorbeAgent:
 
 ```env
 OPENROUTER_API_KEY=la-tua-api-key
@@ -48,6 +48,16 @@ Le sessioni sono salvate come JSONL in `.corbecode/sessions/`; `.corbecode/activ
 
 ## Funzionamento
 
+L'interfaccia usa `@earendil-works/pi-tui`: cronologia scorrevole sopra e box di input multilinea fissato in basso. Risposte del modello renderizzate in Markdown (titoli, liste, tabelle e blocchi di codice); reasoning, tool, errori, utilizzo token e approvazioni sono mostrati nella stessa cronologia. Lo spinner e uno stato della TUI e non scrive direttamente sul terminale.
+
+- `Enter`: invia; `Alt+Enter`: nuova riga (anche `Shift+Enter` nei terminali compatibili).
+- `/`: apre l'autocomplete dei comandi; frecce per scegliere, `Tab` per completare.
+- `@`: apre l'autocomplete di file e directory del workspace, anche con spazi e percorsi Windows; seleziona una directory per proseguire lungo il percorso. Non richiede `fd`. I riferimenti restano testo nel prompt: non allegano automaticamente il contenuto dei file.
+- `PageUp`/`PageDown` o rotella del mouse: scorrono la cronologia senza spostare l'input.
+- `Ctrl+C`: annulla la richiesta LLM o l'approvazione in corso; quando la CLI attende un nuovo messaggio, esce ripristinando il terminale. I comandi shell gia avviati restano soggetti al timeout del tool.
+
+L'input e condiviso tra chat e approvazioni; durante l'esecuzione non vengono inviati nuovi messaggi. `--help` e `--version` funzionano anche senza TTY.
+
 All'avvio Corbe Code mostra nome, versione e modello. Se presente, `AGENTS.md` nella root del workspace viene aggiunto al contesto del modello. Prima di eseguire `shell`, `edit_file` o `write_file`, Corbe Code mostra l'azione proposta e chiede conferma; è possibile approvare una singola azione, rifiutarla o accettare sempre le modifiche per il workspace nella sessione corrente. L'accettazione persistente è salvata nei metadati della sessione e resta valida dopo il riavvio. Gli altri tool non modificano il workspace e vengono eseguiti senza conferma. Ogni richiesta viene inviata al modello insieme alla cronologia della sessione e ai tool disponibili. Se il modello invoca un tool, il programma registra nome, input, esito e durata; gli output dei log sono limitati a 500 caratteri. A fine risposta mostra l'utilizzo dei token.
 
 Il modello usa `ask_user_input` solo quando manca un'informazione decisiva che non può ricavare dal workspace. I prompt condividono l'input del terminale con la chat; scelte invalide vengono ripetute e i default devono corrispondere a una delle opzioni.
@@ -57,7 +67,8 @@ Il modello usa `ask_user_input` solo quando manca un'informazione decisiva che n
 All'avvio viene ripresa automaticamente l'ultima sessione attiva. I comandi disponibili sono:
 
 - `/new`: crea e attiva una nuova sessione.
-- `/sessions`: elenca le sessioni con ID breve, ultima modifica e anteprima del primo messaggio.
+- `/sessions`: apre un selettore delle sessioni; frecce per scegliere, Invio per attivare, Esc per annullare. Aggiorna cronologia, approvazioni e ID nel footer.
+- `/skills`: mostra una tabella con nome e descrizione delle skill disponibili.
 - `/restore <sessionId>`: riprende una sessione usando l'ID breve mostrato nell'elenco; sono richiesti almeno 8 caratteri.
 - `/compress`: comprime solo la sessione attiva e sostituisce il suo JSONL con il riepilogo; la cronologia originale rimossa non viene conservata.
 - `/quit` e `/exit`: chiudono la chat. Restano supportati anche `quit` ed `exit` senza slash.

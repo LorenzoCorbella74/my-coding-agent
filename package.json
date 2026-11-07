@@ -1,6 +1,6 @@
 {
   "name": "corbe-code",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "",
   "types": "module",
   "main": "src/index.js",
@@ -8,7 +8,7 @@
     "corbecode": "dist/cli.js"
   },
   "scripts": {
-    "test": "tsx --test src/sessionStore.test.ts src/workspaceInstructions.test.ts src/terminalInput.test.ts src/agents.test.ts",
+    "test": "tsx --test src/sessionStore.test.ts src/workspaceInstructions.test.ts src/terminalInput.test.ts src/agents.test.ts src/terminalUi.test.ts",
     "dev": "tsx --env-file=.env src/cli.ts",
     "build": "tsc --noEmit -p tsconfig.json && esbuild src/cli.ts --bundle --platform=node --format=esm --packages=external --banner:js=\"#!/usr/bin/env node\" --outfile=dist/cli.js"
   },
@@ -17,6 +17,7 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "@earendil-works/pi-tui": "^1.5.0",
     "@openrouter/ai-sdk-provider": "^3.1.0",
     "ai": "^7.0.162",
     "chalk": "^6.0.1",

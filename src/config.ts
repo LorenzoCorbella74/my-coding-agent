@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import path from 'node:path';
 
-dotenv.config()
+dotenv.config({ quiet: true })
 
 /** CONSTANTS */
 export const CONTEXT_LIMIT = 50000;
