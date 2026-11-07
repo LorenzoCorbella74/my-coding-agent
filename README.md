@@ -44,7 +44,7 @@ Per controllare i tipi e generare il bundle in `dist/`:
 npm run build
 ```
 
-Le sessioni sono salvate come JSONL in `.corbeagent/sessions/`; `.corbeagent/active-session` contiene i metadati JSON di tutte le sessioni (ID attivo, data di creazione, tool approvati e titolo). Il vecchio puntatore testuale viene migrato automaticamente. `.corbeagent/.gitignore` esclude questi dati dal versionamento.
+Le sessioni sono salvate come JSONL in `.corbecode/sessions/`; `.corbecode/active-session` contiene i metadati JSON di tutte le sessioni (ID attivo, data di creazione, tool approvati e titolo). Il vecchio puntatore testuale viene migrato automaticamente. `.corbecode/.gitignore` esclude questi dati dal versionamento.
 
 ## Funzionamento
 
@@ -64,6 +64,8 @@ All'avvio viene ripresa automaticamente l'ultima sessione attiva. I comandi disp
 
 ## Tool
 
+- `task`: delega un compito a un subagent con contesto separato. Il parametro opzionale `agent` seleziona un agente custom per nome; se omesso usa il subagent generico.
+
 - `explore_workspace`: elenca file e directory senza leggerne il contenuto. Supporta root, glob, tipo, profondità, esclusioni e limite risultati. Esclude cartelle comuni di dipendenze/build e applica le esclusioni derivate da `.gitignore`.
 - `searchCode`: cerca testo letterale o regex e restituisce percorso, righe e contesto. Supporta root, glob, maiuscole/minuscole, righe di contesto e limite risultati; ignora file oltre 2 MB. È implementato con API Node e non richiede `ripgrep`.
 - `read_file` e `read_files`: leggono uno o più file nel workspace. La lettura multipla accetta fino a 20 percorsi; l'output è limitato a 50.000 caratteri.
@@ -72,6 +74,28 @@ All'avvio viene ripresa automaticamente l'ultima sessione attiva. I comandi disp
 - `ask_user_input`: raccoglie una risposta libera o una scelta. Richiede un terminale interattivo.
 
 I percorsi dei tool di lettura e scrittura sono confinati al workspace. Esplorazione e ricerca sono in sola lettura.
+
+## Agenti custom
+
+Crea file `.agent.md` (o `.md`) in `.corbecode/agents/` nel workspace. Come per le skill, vengono caricati all'avvio; nomi, descrizioni e tool disponibili entrano nel system prompt del modello principale. Le istruzioni complete vengono aggiunte al system prompt del subagent selezionato tramite `task({ task: "...", agent: "Reviewer" })`, insieme alle istruzioni del workspace in `AGENTS.md`.
+
+```markdown
+---
+name: Reviewer
+description: "Usa per revisioni del codice: identifica bug senza modificare file."
+tools: [read, search]
+---
+Analizza il codice e segnala solo problemi concreti, indicando file e righe.
+Non modificare file.
+```
+
+Il formato YAML supporta stringhe quotate, valori multilinea, liste inline o a blocchi e `tools` come stringa separata da virgole. `description` e istruzioni sono obbligatorie; `name` omesso usa il nome del file senza `.agent.md` o `.md`.
+
+I tool possono essere i nomi nativi della CLI oppure gli alias `read` (lettura singola/multipla), `search`/`Grep`/`Glob` (esplorazione/ricerca), `edit`/`MultiEdit`/`Write` (modifica/scrittura), `execute`/`Bash`/`powershell` (shell). Gli alias non distinguono maiuscole e minuscole. Omettere `tools` o usare `["*"]` abilita tutti i tool del subagent; `[]` li disabilita tutti. I tool esclusi non vengono forniti al modello, anche se approvati nella sessione. Le operazioni modificative mantengono il flusso di approvazione esistente.
+
+La compatibilita con Copilot riguarda `name`, `description`, `tools` e il corpo Markdown, non funzionalita specifiche come `model`, `handoffs`, hook o MCP. Campi non supportati, tool sconosciuti, YAML invalido e nomi duplicati causano un errore esplicito all'avvio. I subagent non hanno accesso a `task`, per evitare delegazioni ricorsive.
+
+Il campo Copilot `user-invocable` e accettato come booleano (`true` o `false`). Riguarda la selezione manuale in un picker, non la delega dal modello: poiche la CLI non ha un picker, non cambia il comportamento di `task.agent` ne la scoperta degli agenti.
 
 ## TODO
 

@@ -40,7 +40,7 @@ export class SessionStore {
     private readonly ignoreFile: string;
 
     constructor(workspaceRoot: string) {
-        const dataDirectory = path.join(workspaceRoot, ".corbeagent");
+        const dataDirectory = path.join(workspaceRoot, ".corbecode");
         this.sessionsDirectory = path.join(dataDirectory, "sessions");
         this.activeFile = path.join(dataDirectory, "active-session");
         this.ignoreFile = path.join(dataDirectory, ".gitignore");

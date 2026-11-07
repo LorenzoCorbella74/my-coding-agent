@@ -8,7 +8,7 @@
     "corbecode": "dist/cli.js"
   },
   "scripts": {
-    "test": "tsx --test src/sessionStore.test.ts src/workspaceInstructions.test.ts src/terminalInput.test.ts",
+    "test": "tsx --test src/sessionStore.test.ts src/workspaceInstructions.test.ts src/terminalInput.test.ts src/agents.test.ts",
     "dev": "tsx --env-file=.env src/cli.ts",
     "build": "tsc --noEmit -p tsconfig.json && esbuild src/cli.ts --bundle --platform=node --format=esm --packages=external --banner:js=\"#!/usr/bin/env node\" --outfile=dist/cli.js"
   },
@@ -21,7 +21,8 @@
     "ai": "^7.0.162",
     "chalk": "^6.0.1",
     "dotenv": "^18.0.9",
-    "zod": "^4.6.7"
+    "zod": "^4.6.7",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

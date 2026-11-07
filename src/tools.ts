@@ -15,12 +15,13 @@ import { SkillLoader } from "./skills";
 import { runSubagent } from "./tools/subagents";
 import type { Session } from "./sessionStore";
 import type { createSpinner } from "./spinner";
+import { AgentLoader } from "./agents";
 
 export const MAX_READ_CHARS = 50000;
 export const MAX_BATCH_READ_FILES = 20;
 export const MAX_SEARCH_FILE_BYTES = 2_000_000;
 export const DEFAULT_EXCLUDED_DIRS = new Set([
-    ".git", ".corbeagent", "node_modules", "dist", "build", "coverage", "out", "target", ".next", ".nuxt", ".cache", ".angular"
+    ".git", ".corbecode", "node_modules", "dist", "build", "coverage", "out", "target", ".next", ".nuxt", ".cache", ".angular"
 ]);
 
 
@@ -140,6 +141,8 @@ export const TOOLS = {
     })
 };
 
+const AGENTS = new AgentLoader(WORKDIR, TOOLS);
+export const AGENTS_DESCRIPTIONS = AGENTS.getDescriptions();
 
 
 export const createParentTools = (
@@ -154,8 +157,9 @@ export const createParentTools = (
         inputSchema: zodSchema(
             z.object({
                 task: z.string(),
+                agent: z.string().optional().describe("Name of a custom agent from the available agents list; omit for a general-purpose subagent"),
             }),
         ),
-        execute: async ({ task }) => runSubagent(task, activeSession, spinner, approveTools),
+        execute: async ({ task, agent }) => runSubagent(task, activeSession, spinner, approveTools, agent === undefined ? undefined : AGENTS.get(agent)),
     }),
 });

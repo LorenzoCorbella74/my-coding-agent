@@ -38,13 +38,13 @@ test("persists, resumes, restores, and replaces only the selected session", () =
         ]);
         assert.deepEqual(store.restore(second.id).messages, []);
 
-        const activeState = JSON.parse(readFileSync(path.join(workspace, ".corbeagent", "active-session"), "utf8"));
+        const activeState = JSON.parse(readFileSync(path.join(workspace, ".corbecode", "active-session"), "utf8"));
         assert.equal(activeState.version, 1);
         assert.equal(activeState.activeSessionId, second.id);
         assert.equal(activeState.sessions[first.id].title, "first prompt");
         assert.deepEqual(activeState.sessions[first.id].approvedTools, ["shell", "edit_file"]);
 
-        const ignoreRules = readFileSync(path.join(workspace, ".corbeagent", ".gitignore"), "utf8");
+        const ignoreRules = readFileSync(path.join(workspace, ".corbecode", ".gitignore"), "utf8");
         assert.match(ignoreRules, /sessions\//);
         assert.match(ignoreRules, /active-session/);
     } finally {
@@ -58,10 +58,10 @@ test("migrates the legacy active-session pointer to JSON", () => {
         const store = new SessionStore(workspace);
         const session = store.create();
         store.append(session.id, { role: "user", content: "legacy title" });
-        writeFileSync(path.join(workspace, ".corbeagent", "active-session"), session.id);
+        writeFileSync(path.join(workspace, ".corbecode", "active-session"), session.id);
 
         const resumed = new SessionStore(workspace).resumeOrCreate();
-        const state = JSON.parse(readFileSync(path.join(workspace, ".corbeagent", "active-session"), "utf8"));
+        const state = JSON.parse(readFileSync(path.join(workspace, ".corbecode", "active-session"), "utf8"));
         assert.equal(resumed.id, session.id);
         assert.equal(state.activeSessionId, session.id);
         assert.equal(state.sessions[session.id].title, "legacy title");

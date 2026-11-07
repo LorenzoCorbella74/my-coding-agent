@@ -1,8 +1,9 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { WORKDIR } from "./config";
+import { parseFrontmatter } from "./frontmatter";
 
-let _SKILLS_DIR = path.join(WORKDIR, ".corbeagent/skills");
+let _SKILLS_DIR = path.join(WORKDIR, ".corbecode/skills");
 export const getSKILLS_DIR = () => _SKILLS_DIR;
 export const setSKILLS_DIR = (dir: string) => { _SKILLS_DIR = dir; };
 
@@ -29,15 +30,8 @@ export class SkillLoader {
     }
 
     parseFrontmatter(text: string): Skill {
-        const match = text.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
-        if (!match) return { meta: {}, body: text };
-        const [, rawMeta = '', rawBody = ''] = match;
-        const meta: Record<string, string> = {};
-        for (const line of rawMeta.split('\n')) {
-            const [k, ...v] = line.split(':');
-            if (k && v.length) meta[k.trim()] = v.join(':').trim();
-        }
-        return { meta, body: rawBody.trim() };
+        const { meta, body } = parseFrontmatter(text);
+        return { meta: Object.fromEntries(Object.entries(meta).map(([key, value]) => [key, String(value)])), body };
     }
 
     getDescriptions() {

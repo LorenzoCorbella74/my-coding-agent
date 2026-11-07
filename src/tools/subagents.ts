@@ -5,6 +5,8 @@ import chalk from "chalk";
 import type { Session } from "../sessionStore";
 import type { createSpinner } from "../spinner";
 import { askTerminal, getApprovalDecision } from "../terminalInput";
+import { selectAgentTools, type CustomAgent } from "../agents";
+import { readWorkspaceInstructions } from "../workspaceInstructions";
 
 const MUTATING_TOOLS = ["shell", "edit_file", "write_file"];
 
@@ -13,13 +15,22 @@ export const runSubagent = async (
     activeSession: Session,
     spinner: ReturnType<typeof createSpinner>,
     approveTools: (tools: string[]) => void,
+    agent?: CustomAgent,
 ): Promise<string> => {
     const messages: ModelMessage[] = [{ role: "user", content: prompt }];
+    const workspaceInstructions = await readWorkspaceInstructions(WORKDIR);
+    const tools = selectAgentTools(TOOLS, agent?.tools);
+    const system = [
+        `You are ${agent?.name ?? "a coding subagent"} at ${WORKDIR}. 
+        Complete your given task, then summarize your findings.`,
+        workspaceInstructions,
+        agent?.body ?? "",
+    ].filter(Boolean).join("\n\n");
     const generate = () => generateText({
         model: api(MODEL),
-        system: `You are a coding subagent at ${WORKDIR}. Complete your given task, then summarize your findings.`,
+        system,
         messages,
-        tools: TOOLS,
+        tools,
         stopWhen: isLoopFinished(),
         toolApproval: {
             shell: () => activeSession.approvedTools.includes("shell") ? "approved" : "user-approval",

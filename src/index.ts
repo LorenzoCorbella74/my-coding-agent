@@ -8,7 +8,7 @@ import { createParentTools, TOOLS } from "./tools";
 import { askTerminal, closeTerminalInput, getApprovalDecision } from "./terminalInput";
 import { WORKDIR, api, MODEL, CONTEXT_LIMIT } from "./config";
 import { SessionStore } from "./sessionStore";
-import { SKILLS_DESCRIPTIONS } from "./tools";
+import { SKILLS_DESCRIPTIONS, AGENTS_DESCRIPTIONS } from "./tools";
 import { readWorkspaceInstructions } from "./workspaceInstructions";
 
 const workspaceInstructions = await readWorkspaceInstructions(WORKDIR);
@@ -17,6 +17,10 @@ You are CORBE CODE an expert coding agent at ${WORKDIR}.
 Use tools to solve tasks.
 
 Use the task tool to delegate exploration or subtasks with fresh context.
+Choose a custom agent by setting the task tool's agent parameter to its exact name when its description matches the task.
+
+Available custom agents:
+${AGENTS_DESCRIPTIONS}
 
 Use explore_workspace to find files without reading contents, and read_files when you need to read multiple files. 
 Use searchCode to locate literal text or regex matches before reading relevant files; include only the context needed to identify the code path.
