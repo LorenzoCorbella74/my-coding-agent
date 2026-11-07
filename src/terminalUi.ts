@@ -1,23 +1,32 @@
 import chalk from "chalk";
+import { lavender } from "./palette";
+import { highlight, supportsLanguage } from "cli-highlight";
+import { getActionPreview } from "./actionPreview";
 import { readdir } from "node:fs/promises";
 import path from "node:path";
 import {
     CombinedAutocompleteProvider, Container, Editor, Loader, Markdown, matchesKey,
-    ProcessTerminal, ScrollView, SelectList, Text, TuiAltScreen, VStack,
+    ProcessTerminal, ScrollView, SelectList, Spacer, Text, TuiAltScreen, VStack,
     stripTerminalSequences,
     type AutocompleteProvider, type MarkdownTheme, type SlashCommand, type Terminal, type SelectItem,
 } from "@earendil-works/pi-tui";
 
 const selectTheme = {
     selectedPrefix: chalk.cyan, selectedText: chalk.bold.cyan,
-    description: chalk.gray, scrollInfo: chalk.gray, noMatch: chalk.yellow,
+    description: chalk.gray, scrollInfo: chalk.gray, noMatch: lavender,
 };
 const markdownTheme: MarkdownTheme = {
-    heading: chalk.bold.cyan, link: chalk.blue, linkUrl: chalk.gray,
-    code: chalk.yellow, codeBlock: chalk.white, codeBlockBorder: chalk.gray,
+    heading: chalk.bold.cyan, link: lavender, linkUrl: chalk.gray,
+    code: lavender, codeBlock: chalk.white, codeBlockBorder: chalk.gray,
     quote: chalk.gray, quoteBorder: chalk.gray, hr: chalk.gray,
     listBullet: chalk.cyan, bold: chalk.bold, italic: chalk.italic,
     strikethrough: chalk.strikethrough, underline: chalk.underline,
+    highlightCode: (code, language) => language && supportsLanguage(language)
+        ? highlight(code, {
+            language, ignoreIllegals: true,
+            theme: { keyword: lavender, string: chalk.cyan, comment: chalk.gray, number: lavender, default: chalk.white },
+        }).split("\n")
+        : code.split("\n"),
 };
 
 export const createAutocomplete = (workspace: string, commands: SlashCommand[]): AutocompleteProvider => {
@@ -75,6 +84,7 @@ export class TerminalUi {
     readonly tui: TuiAltScreen;
     readonly editor: ChatEditor;
     readonly transcript = new Container();
+    verbose = false;
     private readonly prompt = new Text("YOU >");
     private readonly status = new Container();
     private readonly footer = new Text("", 1, 0);
@@ -199,6 +209,35 @@ export class TerminalUi {
         this.tui.requestRender();
     }
 
+    writeVerbose(text: string): void {
+        if (this.verbose) this.write(text);
+    }
+
+    writeHeader(title: string, hint: string): void {
+        this.write(chalk.bold.cyan(title));
+        this.transcript.addChild(new Spacer(1));
+        this.write(chalk.gray(hint));
+        this.write("---", "markdown");
+        this.transcript.addChild(new Spacer(1));
+        this.tui.requestRender();
+    }
+
+    writeToolOutput(output: string, limit: number, failed = false): void {
+        this.write(chalk.gray(chalk.bold("Output:")));
+        this.write(failed ? chalk.red(output.slice(0, limit)) : output.slice(0, limit), failed ? "log" : "markdown");
+        if (output.length > limit) this.write(chalk.gray("... (output troncato)"));
+    }
+
+    writeActionPreview(toolName: string, input: unknown): void {
+        const preview = getActionPreview(toolName, input);
+        if (preview) {
+            this.write(chalk.bold.cyan(preview.filePath));
+            this.write(preview.markdown, "markdown");
+        } else {
+            this.write(chalk.gray(JSON.stringify(input, null, 2)));
+        }
+    }
+
     setStatus(label: string): void {
         if (!this.loader) {
             this.loader = new Loader(this.tui, chalk.cyan, chalk.gray, label);
@@ -248,3 +287,6 @@ export const getTerminalUi = (): TerminalUi => {
     return ui;
 };
 export const writeMessage = (text = "", kind: "log" | "user" | "assistant" | "markdown" = "log"): void => getTerminalUi().write(text, kind);
+export const writeVerbose = (text: string): void => getTerminalUi().writeVerbose(text);
+export const writeToolOutput = (output: string, limit: number, failed = false): void => getTerminalUi().writeToolOutput(output, limit, failed);
+export const writeActionPreview = (toolName: string, input: unknown): void => getTerminalUi().writeActionPreview(toolName, input);

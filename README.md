@@ -1,5 +1,7 @@
 # Corbe Code
 
+![Corbe Code](./docs/screen.png)
+
 Corbe Code è un coding agent da terminale, realizzato in TypeScript con Vercel AI SDK e OpenRouter. Mantiene la conversazione durante la sessione, usa tool per esplorare e modificare il workspace.
 
 ## Configurazione
@@ -48,6 +50,14 @@ Le sessioni sono salvate come JSONL in `.corbecode/sessions/`; `.corbecode/activ
 
 ## Funzionamento
 
+Palette della TUI: cyan per titoli, prompt e reasoning; lavanda (`#BD93F9`) per tool, link ed evidenziazioni; arancione (`#FFB86C`) con chiavi in grassetto per statistiche token; grigio per dettagli e metadati; rosso per errori. I colori vengono adattati alle capacita cromatiche del terminale.
+
+Gli output riusciti dei tool vengono renderizzati in Markdown sotto l'etichetta `Output:`; gli errori rimangono testo rosso. Restano i limiti di 500 caratteri per l'agente principale e 100 per i subagent, con indicazione esplicita della troncatura.
+
+I dettagli `Tool started`, `Input` e `Tool completed` sono nascosti all'avvio. `/verbose` ne alterna la visibilita per i messaggi successivi, anche dei subagent, fino alla chiusura della CLI; non modifica la cronologia gia mostrata. Output, errori e approvazioni restano sempre visibili.
+
+Prima della conferma, `write_file` mostra il percorso e una preview completa del contenuto, mentre `edit_file` mostra i frammenti prima/dopo. I blocchi di codice hanno evidenziazione sintattica basata sull'estensione; i linguaggi sconosciuti sono mostrati come testo senza evidenziazione. La preview non modifica i file e si applica anche ai subagent.
+
 L'interfaccia usa `@earendil-works/pi-tui`: cronologia scorrevole sopra e box di input multilinea fissato in basso. Risposte del modello renderizzate in Markdown (titoli, liste, tabelle e blocchi di codice); reasoning, tool, errori, utilizzo token e approvazioni sono mostrati nella stessa cronologia. Lo spinner e uno stato della TUI e non scrive direttamente sul terminale.
 
 - `Enter`: invia; `Alt+Enter`: nuova riga (anche `Shift+Enter` nei terminali compatibili).
@@ -69,6 +79,7 @@ All'avvio viene ripresa automaticamente l'ultima sessione attiva. I comandi disp
 - `/new`: crea e attiva una nuova sessione.
 - `/sessions`: apre un selettore delle sessioni; frecce per scegliere, Invio per attivare, Esc per annullare. Aggiorna cronologia, approvazioni e ID nel footer.
 - `/skills`: mostra una tabella con nome e descrizione delle skill disponibili.
+- `/verbose`: attiva/disattiva i dettagli di esecuzione dei tool (inizialmente disattivati).
 - `/restore <sessionId>`: riprende una sessione usando l'ID breve mostrato nell'elenco; sono richiesti almeno 8 caratteri.
 - `/compress`: comprime solo la sessione attiva e sostituisce il suo JSONL con il riepilogo; la cronologia originale rimossa non viene conservata.
 - `/quit` e `/exit`: chiudono la chat. Restano supportati anche `quit` ed `exit` senza slash.
@@ -96,6 +107,7 @@ name: Reviewer
 description: "Usa per revisioni del codice: identifica bug senza modificare file."
 tools: [read, search]
 ---
+
 Analizza il codice e segnala solo problemi concreti, indicando file e righe.
 Non modificare file.
 ```

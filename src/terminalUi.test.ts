@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import chalk from "chalk";
+import { lavender } from "./palette";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -6,6 +8,7 @@ import { test } from "node:test";
 import { ProcessTerminal, stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import { createAutocomplete, renderMarkdown, TerminalUi } from "./terminalUi";
 import { getSKILLS_DIR, setSKILLS_DIR, SkillLoader } from "./skills";
+import { getActionPreview } from "./actionPreview";
 
 class TestTerminal extends ProcessTerminal {
     input: ((data: string) => void) | undefined;
@@ -31,6 +34,48 @@ class TestTerminal extends ProcessTerminal {
     override setProgress(): void {}
     override restoreOnExit(): void {}
 }
+
+test("toggles verbose tool details without hiding outputs or errors", () => {
+    const ui = new TerminalUi(tmpdir(), [], new TestTerminal());
+    try {
+        ui.writeVerbose("Tool started: hidden");
+        assert.equal(ui.transcript.render(80).length, 0);
+        ui.verbose = !ui.verbose;
+        for (const text of ["Tool started: visible", "Input: visible", "Tool completed: visible"]) {
+            ui.writeVerbose(text);
+        }
+        ui.verbose = !ui.verbose;
+        ui.writeVerbose("Tool completed: hidden");
+        ui.writeToolOutput("result", 500);
+        ui.write("Tool failed: error");
+        const rendered = ui.transcript.render(80).map(stripTerminalSequences).join("\n");
+        assert.doesNotMatch(rendered, /hidden/);
+        assert.match(rendered, /Tool started: visible/);
+        assert.match(rendered, /Input: visible/);
+        assert.match(rendered, /Tool completed: visible/);
+        assert.match(rendered, /result/);
+        assert.match(rendered, /Tool failed: error/);
+    } finally {
+        ui.close();
+    }
+});
+
+test("spaces the header and separates hints from conversation messages", () => {
+    const ui = new TerminalUi(tmpdir(), [], new TestTerminal());
+    try {
+        ui.writeHeader("CORBE CODE", "Enter: invia");
+        ui.write("first message");
+        const lines = ui.transcript.render(80).map(stripTerminalSequences).map((line) => line.trim());
+        assert.equal(lines[0], "CORBE CODE");
+        assert.equal(lines[1], "");
+        assert.equal(lines[2], "Enter: invia");
+        const message = lines.indexOf("first message");
+        assert.ok(lines.slice(3, message).some((line) => /[─━-]{3}/.test(line)));
+        assert.equal(lines[message - 1], "");
+    } finally {
+        ui.close();
+    }
+});
 
 test("completes slash commands and @ paths including directories and spaces", async () => {
     const workspace = mkdtempSync(path.join(tmpdir(), "corbecode-tui-files-"));
@@ -182,5 +227,59 @@ test("renders available skill names and descriptions as a Markdown table", () =>
     } finally {
         setSKILLS_DIR(previous);
         rmSync(directory, { recursive: true, force: true });
+    }
+});
+
+test("renders tool output as Markdown with a separate label and truncation notice", () => {
+    const ui = new TerminalUi(tmpdir(), [], new TestTerminal());
+    try {
+        ui.writeToolOutput("**Result** with `code`", 500);
+        let rendered = ui.transcript.render(80).map(stripTerminalSequences).join("\n");
+        assert.match(rendered, /Output:/);
+        assert.match(rendered, /Result with code/);
+        assert.doesNotMatch(rendered, /\*\*Result\*\*|`code`/);
+        ui.writeToolOutput("abcdef", 3);
+        rendered = ui.transcript.render(80).map(stripTerminalSequences).join("\n");
+        assert.match(rendered, /abc/);
+        assert.doesNotMatch(rendered, /abcdef/);
+        assert.match(rendered, /output troncato/);
+        ui.writeToolOutput("Error: **literal**", 500, true);
+        assert.match(ui.transcript.render(80).map(stripTerminalSequences).join("\n"), /Error: \*\*literal\*\*/);
+    } finally {
+        ui.close();
+    }
+});
+
+test("previews file writes and edits as extension-aware code without escaped JSON", () => {
+    const ui = new TerminalUi(tmpdir(), [], new TestTerminal());
+    try {
+        const content = "import { x } from 'module';\nconst value = 1;";
+        const preview = getActionPreview("write_file", { filePath: "example.ts", content });
+        assert.match(preview?.markdown ?? "", /^```typescript/);
+        ui.writeActionPreview("write_file", { filePath: "example.ts", content });
+        ui.writeActionPreview("edit_file", { filePath: "example.py", oldText: "x = 1", newText: "x = 2" });
+        const colored = ui.transcript.render(100).join("\n");
+        assert.ok(colored.includes(lavender("const")));
+        assert.ok(colored.includes(chalk.cyan("'module'")));
+        const rendered = stripTerminalSequences(colored);
+        assert.match(rendered, /example.ts/);
+        assert.match(rendered, /const value = 1/);
+        assert.doesNotMatch(rendered, /"content":|\\n/);
+        assert.match(rendered, /Prima/);
+        assert.match(rendered, /Dopo/);
+        assert.match(rendered, /x = 1/);
+        assert.match(rendered, /x = 2/);
+        const nested = getActionPreview("write_file", { filePath: "README.md", content: "```ts\nconst x = 1;\n```" });
+        assert.match(nested?.markdown ?? "", /^````markdown/);
+        for (const extension of ["html", "css", "scss", "java"]) {
+            const preview = getActionPreview("write_file", { filePath: `example.${extension}`, content: "sample" });
+            assert.ok(preview);
+            assert.ok(preview.markdown.startsWith(`\`\`\`${extension}\n`));
+            assert.match(renderMarkdown(preview.markdown).render(100).map(stripTerminalSequences).join("\n"), /sample/);
+        }
+        assert.throws(() => getActionPreview("write_file", { content }), /filePath/);
+        assert.equal(getActionPreview("shell", { command: "test" }), undefined);
+    } finally {
+        ui.close();
     }
 });

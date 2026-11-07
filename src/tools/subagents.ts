@@ -2,12 +2,13 @@ import { generateText, isLoopFinished, type ModelMessage } from "ai";
 import { api, MODEL, WORKDIR } from "../config";
 import { TOOLS } from "../tools";
 import chalk from "chalk";
+import { lavender } from "../palette";
 import type { Session } from "../sessionStore";
 import type { createSpinner } from "../spinner";
 import { askTerminal, getApprovalDecision } from "../terminalInput";
 import { selectAgentTools, type CustomAgent } from "../agents";
 import { readWorkspaceInstructions } from "../workspaceInstructions";
-import { writeMessage } from "../terminalUi";
+import { writeMessage, writeVerbose, writeToolOutput, writeActionPreview } from "../terminalUi";
 
 const MUTATING_TOOLS = ["shell", "edit_file", "write_file"];
 
@@ -53,8 +54,8 @@ export const runSubagent = async (
         },
         onToolExecutionStart: ({ toolCall }) => {
             spinner.stop();
-            writeMessage(chalk.magenta(`Subagent tool started: ${toolCall.toolName} (${toolCall.toolCallId})`));
-            writeMessage(chalk.gray(`Input: ${JSON.stringify(toolCall.input).slice(0, 100)}`));
+            writeVerbose(lavender(`Subagent tool started: ${toolCall.toolName} (${toolCall.toolCallId})`));
+            writeVerbose(chalk.gray(`Input: ${JSON.stringify(toolCall.input).slice(0, 100)}`));
             spinner.start(`Subagent running ${toolCall.toolName}`);
         },
         onToolExecutionEnd: ({ toolCall, toolExecutionMs, toolOutput }) => {
@@ -62,8 +63,9 @@ export const runSubagent = async (
             const failed = toolOutput.type === "tool-error";
             const output = failed ? String(toolOutput.error) : String(toolOutput.output);
             const status = `Subagent tool ${failed ? "failed" : "completed"}: ${toolCall.toolName} (${toolExecutionMs} ms)`;
-            writeMessage(failed ? chalk.red(status) : chalk.green(status));
-            writeMessage(chalk.gray(`Output: ${output.slice(0, 100)}${output.length > 100 ? "..." : ""}`));
+            if (failed) writeMessage(chalk.red(status));
+            else writeVerbose(lavender(status));
+            writeToolOutput(output, 100, failed);
             spinner.start("Subagent thinking");
         },
     });
@@ -79,8 +81,8 @@ export const runSubagent = async (
         const approvalResponses = [];
         for (const request of result.content) {
             if (request.type !== "tool-approval-request" || request.isAutomatic) continue;
-            writeMessage(chalk.yellow(`\nAzione proposta dal subagent: ${request.toolCall.toolName}`));
-            writeMessage(chalk.gray(JSON.stringify(request.toolCall.input, null, 2)));
+            writeMessage(lavender(`\nAzione proposta dal subagent: ${request.toolCall.toolName}`));
+            writeActionPreview(request.toolCall.toolName, request.toolCall.input);
             spinner.stop();
             const answer = await askTerminal(chalk.cyan("Eseguire? [s]ì / [n]o / [a]ccetta sempre in questo workspace per questa sessione: "));
             spinner.start("Subagent thinking");
@@ -90,7 +92,7 @@ export const runSubagent = async (
                 approveTools(MUTATING_TOOLS);
                 activeSession.approvedTools = MUTATING_TOOLS;
             }
-            if (!approved) writeMessage(chalk.yellow("Azione rifiutata."));
+            if (!approved) writeMessage(lavender("Azione rifiutata."));
             approvalResponses.push({
                 type: "tool-approval-response" as const,
                 approvalId: request.approvalId,

@@ -1,4 +1,5 @@
 import chalk from "chalk";
+import { lavender, orange } from "./palette";
 import { withSpinner } from "./spinner";
 import { generateText, isLoopFinished } from "ai";
 import { microCompact, estimateTokens, autoCompact } from "./compact";
@@ -10,7 +11,7 @@ import { WORKDIR, api, MODEL, CONTEXT_LIMIT } from "./config";
 import { SessionStore } from "./sessionStore";
 import { SKILLS_DESCRIPTIONS, AGENTS_DESCRIPTIONS, getSkillsTable } from "./tools";
 import { readWorkspaceInstructions } from "./workspaceInstructions";
-import { startTerminalUi, writeMessage } from "./terminalUi";
+import { startTerminalUi, writeMessage, writeVerbose, writeToolOutput, writeActionPreview } from "./terminalUi";
 
 const workspaceInstructions = await readWorkspaceInstructions(WORKDIR);
 const SYSTEM_PROMPT = `
@@ -46,7 +47,7 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
 
   microCompact(messages);
   const estTokens = estimateTokens(messages);
-  writeMessage(chalk.yellow(`Tokens usati finora, ${estTokens}`));
+  writeMessage(orange(`${chalk.bold("Tokens usati finora:")} ${estTokens}`));
   if (estTokens > CONTEXT_LIMIT) {
     writeMessage(`compacting at ${estTokens}`);
     const compacted = await withSpinner("Compressing context", () => autoCompact(messages, requestController?.signal));
@@ -84,8 +85,8 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
     },
     onToolExecutionStart: ({ toolCall }) => {
       spinner.stop();
-      writeMessage(chalk.magenta(`Tool started: ${toolCall.toolName} (${toolCall.toolCallId})`));
-      writeMessage(chalk.gray(`Input: ${JSON.stringify(toolCall.input).slice(0, 500)}`));
+      writeVerbose(lavender(`Tool started: ${toolCall.toolName} (${toolCall.toolCallId})`));
+      writeVerbose(chalk.gray(`Input: ${JSON.stringify(toolCall.input).slice(0, 500)}`));
       spinner.start(`Running ${toolCall.toolName}`);
     },
     onToolExecutionEnd: ({ toolCall, toolExecutionMs, toolOutput }) => {
@@ -93,8 +94,9 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
       const failed = toolOutput.type === "tool-error";
       const output = failed ? String(toolOutput.error) : String(toolOutput.output);
       const status = `Tool ${failed ? "failed" : "completed"}: ${toolCall.toolName} (${toolExecutionMs} ms)`;
-      writeMessage(failed ? chalk.red(status) : chalk.green(status));
-      writeMessage(chalk.gray(`Output: ${output.slice(0, 500)}${output.length > 500 ? "..." : ""}`));
+      if (failed) writeMessage(chalk.red(status));
+      else writeVerbose(lavender(status));
+      writeToolOutput(output, 500, failed);
       spinner.start("Thinking");
     },
   }));
@@ -117,8 +119,8 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
     const approvalResponses = [];
     for (const request of result.content) {
       if (request.type !== "tool-approval-request" || request.isAutomatic) continue;
-      writeMessage(chalk.yellow(`\nAzione proposta: ${request.toolCall.toolName}`));
-      writeMessage(chalk.gray(JSON.stringify(request.toolCall.input, null, 2)));
+      writeMessage(lavender(`\nAzione proposta: ${request.toolCall.toolName}`));
+      writeActionPreview(request.toolCall.toolName, request.toolCall.input);
       const answer = await askTerminal(chalk.cyan("Eseguire? [s]ì / [n]o / [a]ccetta sempre in questo workspace per questa sessione: "));
       const decision = getApprovalDecision(answer);
       const approved = decision !== "deny";
@@ -126,7 +128,7 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
         sessionStore.approveTools(activeSession.id, MUTATING_TOOLS);
         activeSession.approvedTools = MUTATING_TOOLS;
       }
-      if (!approved) writeMessage(chalk.yellow("Azione rifiutata."));
+      if (!approved) writeMessage(lavender("Azione rifiutata."));
       approvalResponses.push({
         type: "tool-approval-response" as const,
         approvalId: request.approvalId,
@@ -138,7 +140,7 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
     result = await generate(workingMessages);
   }
 
-  writeMessage(chalk.yellow(`Usage: Input: ${inputTokens} - Output: ${outputTokens} - Total: ${totalTokens}`));
+  writeMessage(orange(`${chalk.bold("Usage:")} ${chalk.bold("Input:")} ${inputTokens} - ${chalk.bold("Output:")} ${outputTokens} - ${chalk.bold("Total:")} ${totalTokens}`));
   return result.text;
 };
 
@@ -146,25 +148,30 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
 type SlashCommandHandler = (args: string) => Promise<boolean>;
 
 const exitChat: SlashCommandHandler = async () => {
-  writeMessage(chalk.red("Exiting chat..."));
+  writeMessage(chalk.gray("Exiting chat..."));
   closeTerminalInput();
   return true;
 };
 
 const slashCommands: Record<string, SlashCommandHandler> = {
+  "/verbose": async () => {
+    ui.verbose = !ui.verbose;
+    writeMessage(chalk.cyan(`Verbose: ${ui.verbose ? "ON" : "OFF"}`));
+    return false;
+  },
   "/quit": exitChat,
   "/exit": exitChat,
   "/new": async () => {
     activeSession = sessionStore.create();
     history = activeSession.messages;
     updateFooter();
-    writeMessage(chalk.green(`Started session ${activeSession.id.slice(0, 8)}.`));
+    writeMessage(chalk.cyan(`Started session ${activeSession.id.slice(0, 8)}.`));
     return false;
   },
   "/sessions": async () => {
     const sessions = sessionStore.list();
     if (sessions.length === 0) {
-      writeMessage(chalk.yellow("No sessions found."));
+      writeMessage(lavender("No sessions found."));
       return false;
     }
     const selected = await ui.select("Seleziona una sessione", sessions.map((session) => ({
@@ -176,7 +183,7 @@ const slashCommands: Record<string, SlashCommandHandler> = {
       activeSession = sessionStore.restore(selected);
       history = activeSession.messages;
       updateFooter();
-      writeMessage(chalk.green(`Restored session ${activeSession.id.slice(0, 8)}.`));
+      writeMessage(chalk.cyan(`Restored session ${activeSession.id.slice(0, 8)}.`));
     }
     return false;
   },
@@ -186,14 +193,14 @@ const slashCommands: Record<string, SlashCommandHandler> = {
   },
   "/restore": async (idPrefix) => {
     if (!idPrefix) {
-      writeMessage(chalk.yellow("Usage: /restore <sessionId>"));
+      writeMessage(lavender("Usage: /restore <sessionId>"));
       return false;
     }
     try {
       activeSession = sessionStore.restore(idPrefix);
       history = activeSession.messages;
       updateFooter();
-      writeMessage(chalk.green(`Restored session ${activeSession.id.slice(0, 8)}.`));
+      writeMessage(chalk.cyan(`Restored session ${activeSession.id.slice(0, 8)}.`));
     } catch (error) {
       writeMessage(chalk.red(error instanceof Error ? error.message : String(error)));
     }
@@ -201,7 +208,7 @@ const slashCommands: Record<string, SlashCommandHandler> = {
   },
   "/compress": async () => {
     if (history.length === 0) {
-      writeMessage(chalk.yellow("Nothing to compress."));
+      writeMessage(lavender("Nothing to compress."));
       return false;
     }
 
@@ -210,7 +217,7 @@ const slashCommands: Record<string, SlashCommandHandler> = {
       const compacted = await withSpinner("Compressing context", () => autoCompact(history, requestController?.signal));
       sessionStore.replace(activeSession.id, compacted);
       history.splice(0, history.length, ...compacted);
-      writeMessage(chalk.green("Conversation compressed."));
+      writeMessage(chalk.cyan("Conversation compressed."));
     } catch (error) {
       writeMessage(chalk.red(error instanceof Error ? error.message : String(error)));
     } finally {
@@ -242,7 +249,7 @@ const chat = async (): Promise<void> => {
       const handler = slashCommands[command.toLowerCase()];
       try {
         if (!handler) {
-          writeMessage(chalk.yellow(`Unknown command: ${command}`));
+          writeMessage(lavender(`Unknown command: ${command}`));
         } else if (await handler(args.join(" "))) {
           return;
         }
@@ -278,19 +285,19 @@ const ui = startTerminalUi(WORKDIR, Object.keys(slashCommands).map((command) => 
     "/new": "Start a new session", "/sessions": "List sessions", "/restore": "Restore a session",
     "/compress": "Compress the conversation", "/quit": "Quit", "/exit": "Quit",
     "/skills": "List available skills",
+    "/verbose": "Toggle tool execution details",
   }[command] ?? "",
 })));
 ui.onInterrupt = () => requestController?.abort();
-writeMessage(chalk.bold.cyan([
+ui.writeHeader([
   "  ____ ___  ____  ____  _____    ____ ___  ____  _____",
   " / ___/ _ \\|  _ \\| __ )| ____|  / ___/ _ \\|  _ \\| ____|",
   "| |  | | | | |_) |  _ \\|  _|   | |  | | | | | | |  _|",
   "| |__| |_| |  _ <| |_) | |___  | |__| |_| | |_| | |___",
   " \\____\\___/|_| \\_\\____/|_____|  \\____\\___/|____/|_____|",
-].join("\n")));
-const updateFooter = () => ui.setFooter(`Version ${packageJson.version} | LLM ${MODEL} | Session ${activeSession.id.slice(0, 8)}`);
+].join("\n"), "Enter: invia | Alt+Enter: nuova riga | /: comandi | @: file | PgUp/PgDn: cronologia | Ctrl+C: annulla/esci");
+const updateFooter = () => ui.setFooter(`Version ${packageJson.version} | Model: ${MODEL} | Session ${activeSession.id.slice(0, 8)}`);
 updateFooter();
-writeMessage(chalk.gray("Enter: invia | Alt+Enter: nuova riga | /: comandi | @: file | PgUp/PgDn: cronologia | Ctrl+C: annulla/esci"));
 try {
   await chat();
 } finally {
