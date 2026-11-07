@@ -9,7 +9,9 @@ import { askTerminal, closeTerminalInput } from "./terminalInput";
 import { WORKDIR, api, MODEL, CONTEXT_LIMIT } from "./config";
 import { SessionStore } from "./sessionStore";
 import { SKILLS_DESCRIPTIONS } from "./tools";
+import { readWorkspaceInstructions } from "./workspaceInstructions";
 
+const workspaceInstructions = await readWorkspaceInstructions(WORKDIR);
 const SYSTEM_PROMPT = `
 You are CORBE CODE an expert coding agent at ${WORKDIR}. 
 Use explore_workspace to find files without reading contents, and read_files when you need to read multiple files. 
@@ -21,7 +23,9 @@ Use skill_get for specialized knowledge.
 Skills: 
 ${SKILLS_DESCRIPTIONS}
 
-Act, dont explain.`;
+Act, dont explain.
+
+${workspaceInstructions ? `Workspace instructions from AGENTS.md:\n${workspaceInstructions}` : ""}`;
 
 const sessionStore = new SessionStore(WORKDIR);
 let activeSession = sessionStore.resumeOrCreate();

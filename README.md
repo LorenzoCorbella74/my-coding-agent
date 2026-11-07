@@ -48,7 +48,7 @@ Le sessioni sono salvate come JSONL in `.corbeagent/sessions/` nel workspace; `.
 
 ## Funzionamento
 
-All'avvio CorbeAgent mostra nome, versione e modello. Ogni richiesta viene inviata al modello insieme alla cronologia della sessione e ai tool disponibili. Se il modello invoca un tool, il programma registra nome, input, esito e durata; gli output dei log sono limitati a 500 caratteri. A fine risposta mostra l'utilizzo dei token.
+All'avvio CorbeAgent mostra nome, versione e modello. Se presente, `AGENTS.md` nella root del workspace viene aggiunto al contesto del modello. Ogni richiesta viene inviata al modello insieme alla cronologia della sessione e ai tool disponibili. Se il modello invoca un tool, il programma registra nome, input, esito e durata; gli output dei log sono limitati a 500 caratteri. A fine risposta mostra l'utilizzo dei token.
 
 Il modello usa `ask_user_input` solo quando manca un'informazione decisiva che non può ricavare dal workspace. I prompt condividono l'input del terminale con la chat; scelte invalide vengono ripetute e i default devono corrispondere a una delle opzioni.
 

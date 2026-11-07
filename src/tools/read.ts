@@ -1,5 +1,4 @@
 import { MAX_BATCH_READ_FILES, MAX_READ_CHARS, safePath } from "../tools";
-import { WORKDIR } from "../config";
 import fs from "fs";
 
 export const runRead = (filePath: string, limit?: number) => {
