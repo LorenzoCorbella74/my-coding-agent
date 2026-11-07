@@ -13,6 +13,8 @@ import { SKILLS_DESCRIPTIONS, AGENTS_DESCRIPTIONS, getSkillsTable } from "./tool
 import { readWorkspaceInstructions } from "./workspaceInstructions";
 import { startTerminalUi, writeMessage, writeVerbose, writeToolOutput, writeActionPreview } from "./terminalUi";
 
+const formatTokenCount = (count: number): string => String(count).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+
 const workspaceInstructions = await readWorkspaceInstructions(WORKDIR);
 const SYSTEM_PROMPT = `
 You are CORBE CODE an expert coding agent at ${WORKDIR}. 
@@ -140,7 +142,7 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
     result = await generate(workingMessages);
   }
 
-  writeMessage(orange(`${chalk.bold("Usage:")} ${chalk.bold("Input:")} ${inputTokens} - ${chalk.bold("Output:")} ${outputTokens} - ${chalk.bold("Total:")} ${totalTokens}`));
+  writeMessage(orange(`${chalk.bold("Usage:")} ${chalk.bold("Input:")} ${formatTokenCount(inputTokens)} - ${chalk.bold("Output:")} ${formatTokenCount(outputTokens)} - ${chalk.bold("Total:")} ${formatTokenCount(totalTokens)}`));
   return result.text;
 };
 

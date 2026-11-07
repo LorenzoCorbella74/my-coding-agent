@@ -265,10 +265,9 @@ test("previews file writes and edits as extension-aware code without escaped JSO
         assert.match(rendered, /example.ts/);
         assert.match(rendered, /const value = 1/);
         assert.doesNotMatch(rendered, /"content":|\\n/);
-        assert.match(rendered, /Prima/);
-        assert.match(rendered, /Dopo/);
-        assert.match(rendered, /x = 1/);
-        assert.match(rendered, /x = 2/);
+        assert.doesNotMatch(rendered, /Prima|Dopo/);
+        assert.match(rendered, /-x = 1/);
+        assert.match(rendered, /\+x = 2/);
         const nested = getActionPreview("write_file", { filePath: "README.md", content: "```ts\nconst x = 1;\n```" });
         assert.match(nested?.markdown ?? "", /^````markdown/);
         for (const extension of ["html", "css", "scss", "java"]) {

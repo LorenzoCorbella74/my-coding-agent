@@ -56,7 +56,7 @@ Gli output riusciti dei tool vengono renderizzati in Markdown sotto l'etichetta 
 
 I dettagli `Tool started`, `Input` e `Tool completed` sono nascosti all'avvio. `/verbose` ne alterna la visibilita per i messaggi successivi, anche dei subagent, fino alla chiusura della CLI; non modifica la cronologia gia mostrata. Output, errori e approvazioni restano sempre visibili.
 
-Prima della conferma, `write_file` mostra il percorso e una preview completa del contenuto, mentre `edit_file` mostra i frammenti prima/dopo. I blocchi di codice hanno evidenziazione sintattica basata sull'estensione; i linguaggi sconosciuti sono mostrati come testo senza evidenziazione. La preview non modifica i file e si applica anche ai subagent.
+Prima della conferma, `write_file` mostra il percorso e una preview completa del contenuto, mentre `edit_file` mostra un diff unificato del file con alcune righe di contesto (applicando la stessa sostituzione che eseguirà il tool). I blocchi di codice hanno evidenziazione sintattica basata sull'estensione; i linguaggi sconosciuti sono mostrati come testo senza evidenziazione. La preview non modifica i file e si applica anche ai subagent.
 
 L'interfaccia usa `@earendil-works/pi-tui`: cronologia scorrevole sopra e box di input multilinea fissato in basso. Risposte del modello renderizzate in Markdown (titoli, liste, tabelle e blocchi di codice); reasoning, tool, errori, utilizzo token e approvazioni sono mostrati nella stessa cronologia. Lo spinner e uno stato della TUI e non scrive direttamente sul terminale.
 
