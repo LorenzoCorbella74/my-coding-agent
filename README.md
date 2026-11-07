@@ -72,3 +72,7 @@ All'avvio viene ripresa automaticamente l'ultima sessione attiva. I comandi disp
 - `ask_user_input`: raccoglie una risposta libera o una scelta. Richiede un terminale interattivo.
 
 I percorsi dei tool di lettura e scrittura sono confinati al workspace. Esplorazione e ricerca sono in sola lettura.
+
+## TODO
+
+- [] [Usare Github copilot models](https://vercel.com/changelog/github-copilot-ai-sdk-harness-adapter)

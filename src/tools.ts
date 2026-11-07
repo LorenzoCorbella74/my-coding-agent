@@ -12,6 +12,9 @@ import { runExploreWorkspace } from "./tools/explore";
 import { runSearchCode } from "./tools/search";
 import { WORKDIR } from "./config";
 import { SkillLoader } from "./skills";
+import { runSubagent } from "./tools/subagents";
+import type { Session } from "./sessionStore";
+import type { createSpinner } from "./spinner";
 
 export const MAX_READ_CHARS = 50000;
 export const MAX_BATCH_READ_FILES = 20;
@@ -61,20 +64,6 @@ export const isExcludedWorkspacePath = (relativePath: string, isDirectory: boole
         (isDirectory && path.matchesGlob(`${normalizedPath}/__entry__`, pattern))
     );
 };
-
-
-const askUserInputSchema = z.object({
-    question: z.string().trim().min(1).describe("A single, concise clarification question"),
-    options: z.array(z.string().trim().min(1)).min(1).optional().describe("Non-empty choices when the answer is a bounded decision"),
-    defaultValue: z.string().trim().min(1).optional().describe("Default used only when the user submits a blank answer"),
-}).superRefine(({ options, defaultValue }, context) => {
-    if (options && new Set(options.map((option) => option.toLowerCase())).size !== options.length) {
-        context.addIssue({ code: "custom", path: ["options"], message: "Options must be unique" });
-    }
-    if (defaultValue && options && !options.some((option) => option.toLowerCase() === defaultValue.toLowerCase())) {
-        context.addIssue({ code: "custom", path: ["defaultValue"], message: "The default value must match one of the options" });
-    }
-});
 
 export const TOOLS = {
     explore_workspace: tool({
@@ -150,3 +139,23 @@ export const TOOLS = {
         execute: async ({ name }) => SKILLS.getContent(name),
     })
 };
+
+
+
+export const createParentTools = (
+    activeSession: Session,
+    spinner: ReturnType<typeof createSpinner>,
+    approveTools: (tools: string[]) => void,
+) => ({
+    ...TOOLS,
+    task: tool({
+        description:
+            "Spawn a subagent with fresh context, it shares the file system, but not the conversation history",
+        inputSchema: zodSchema(
+            z.object({
+                task: z.string(),
+            }),
+        ),
+        execute: async ({ task }) => runSubagent(task, activeSession, spinner, approveTools),
+    }),
+});

@@ -4,7 +4,7 @@ import { generateText, isLoopFinished } from "ai";
 import { microCompact, estimateTokens, autoCompact } from "./compact";
 import type { ModelMessage } from "ai";
 import packageJson from "../package.json" with { type: "json" };
-import { TOOLS } from "./tools";
+import { createParentTools, TOOLS } from "./tools";
 import { askTerminal, closeTerminalInput, getApprovalDecision } from "./terminalInput";
 import { WORKDIR, api, MODEL, CONTEXT_LIMIT } from "./config";
 import { SessionStore } from "./sessionStore";
@@ -16,10 +16,13 @@ const SYSTEM_PROMPT = `
 You are CORBE CODE an expert coding agent at ${WORKDIR}. 
 Use tools to solve tasks.
 
+Use the task tool to delegate exploration or subtasks with fresh context.
+
 Use explore_workspace to find files without reading contents, and read_files when you need to read multiple files. 
 Use searchCode to locate literal text or regex matches before reading relevant files; include only the context needed to identify the code path.
 
 Use skill_get for specialized knowledge.
+
 Skills: 
 ${SKILLS_DESCRIPTIONS}
 
@@ -52,7 +55,9 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
     model: api(MODEL),
     system: SYSTEM_PROMPT,
     messages: inputMessages,
-    tools: TOOLS,
+    tools: createParentTools(activeSession, spinner, (tools) => {
+      sessionStore.approveTools(activeSession.id, tools);
+    }),
     toolApproval: {
       shell: () => activeSession.approvedTools.includes("shell") ? "approved" : "user-approval",
       edit_file: () => activeSession.approvedTools.includes("edit_file") ? "approved" : "user-approval",
