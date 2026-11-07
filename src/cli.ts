@@ -5,7 +5,7 @@ import packageJson from '../package.json' with { type: 'json' };
 const printHelp = () => {
     console.log(`CorbeAgent ${packageJson.version}
 
-Usage: corbeagent [--workspace <path>]
+Usage: corbecode [--workspace <path>]
 
 Options:
   -w, --workspace <path>  Workspace directory (defaults to current directory)

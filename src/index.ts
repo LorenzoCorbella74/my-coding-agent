@@ -5,7 +5,7 @@ import { microCompact, estimateTokens, autoCompact } from "./compact";
 import type { ModelMessage } from "ai";
 import packageJson from "../package.json" with { type: "json" };
 import { TOOLS } from "./tools";
-import { askTerminal, closeTerminalInput } from "./terminalInput";
+import { askTerminal, closeTerminalInput, getApprovalDecision } from "./terminalInput";
 import { WORKDIR, api, MODEL, CONTEXT_LIMIT } from "./config";
 import { SessionStore } from "./sessionStore";
 import { SKILLS_DESCRIPTIONS } from "./tools";
@@ -14,22 +14,23 @@ import { readWorkspaceInstructions } from "./workspaceInstructions";
 const workspaceInstructions = await readWorkspaceInstructions(WORKDIR);
 const SYSTEM_PROMPT = `
 You are CORBE CODE an expert coding agent at ${WORKDIR}. 
+Use tools to solve tasks.
+
 Use explore_workspace to find files without reading contents, and read_files when you need to read multiple files. 
 Use searchCode to locate literal text or regex matches before reading relevant files; include only the context needed to identify the code path.
-
-Use tools to solve tasks. 
 
 Use skill_get for specialized knowledge.
 Skills: 
 ${SKILLS_DESCRIPTIONS}
 
-Act, dont explain.
+Act, dont explain or explain briefly if task was long.
 
 ${workspaceInstructions ? `Workspace instructions from AGENTS.md:\n${workspaceInstructions}` : ""}`;
 
 const sessionStore = new SessionStore(WORKDIR);
 let activeSession = sessionStore.resumeOrCreate();
 let history = activeSession.messages;
+const MUTATING_TOOLS = ["shell", "edit_file", "write_file"];
 
 /** AGENT LOOP */
 const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
@@ -46,13 +47,19 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
     console.log(`new tokens, ${estimateTokens(messages)}`);
   }
 
-  const { text, usage } = await withSpinner("Thinking", async (spinner) => generateText({
+  const workingMessages = [...messages];
+  const generate = (inputMessages: ModelMessage[]) => withSpinner("Thinking", async (spinner) => generateText({
     model: api(MODEL),
     system: SYSTEM_PROMPT,
-    messages,
+    messages: inputMessages,
     tools: TOOLS,
+    toolApproval: {
+      shell: () => activeSession.approvedTools.includes("shell") ? "approved" : "user-approval",
+      edit_file: () => activeSession.approvedTools.includes("edit_file") ? "approved" : "user-approval",
+      write_file: () => activeSession.approvedTools.includes("write_file") ? "approved" : "user-approval",
+    },
     stopWhen: isLoopFinished(),
-    onStepFinish: ({ toolCalls, providerMetadata }) => {
+    onStepFinish: ({ providerMetadata }) => {
       const reasoningDetails = providerMetadata?.openrouter?.reasoning_details;
       if (Array.isArray(reasoningDetails) && reasoningDetails.length > 0) {
         spinner.stop();
@@ -79,8 +86,48 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
       spinner.start("Thinking");
     },
   }));
-  console.log(chalk.yellow(`Usage: Input: ${usage.inputTokens} - Output: ${usage.outputTokens} - Total: ${usage.totalTokens}`));
-  return text;
+
+  let result = await generate(workingMessages);
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let totalTokens = 0;
+  while (true) {
+    inputTokens += result.usage.inputTokens ?? 0;
+    outputTokens += result.usage.outputTokens ?? 0;
+    totalTokens += result.usage.totalTokens ?? 0;
+
+    const hasApprovalRequests = result.content.some(
+      (part) => part.type === "tool-approval-request" && !part.isAutomatic,
+    );
+    if (!hasApprovalRequests) break;
+
+    workingMessages.push(...result.responseMessages);
+    const approvalResponses = [];
+    for (const request of result.content) {
+      if (request.type !== "tool-approval-request" || request.isAutomatic) continue;
+      console.log(chalk.yellow(`\nAzione proposta: ${request.toolCall.toolName}`));
+      console.log(chalk.gray(JSON.stringify(request.toolCall.input, null, 2)));
+      const answer = await askTerminal(chalk.cyan("Eseguire? [s]ì / [n]o / [a]ccetta sempre in questo workspace per questa sessione: "));
+      const decision = getApprovalDecision(answer);
+      const approved = decision !== "deny";
+      if (decision === "always") {
+        sessionStore.approveTools(activeSession.id, MUTATING_TOOLS);
+        activeSession.approvedTools = MUTATING_TOOLS;
+      }
+      if (!approved) console.log(chalk.yellow("Azione rifiutata."));
+      approvalResponses.push({
+        type: "tool-approval-response" as const,
+        approvalId: request.approvalId,
+        approved,
+        reason: approved ? "Approvato dall'utente." : "Rifiutato dall'utente.",
+      });
+    }
+    workingMessages.push({ role: "tool", content: approvalResponses });
+    result = await generate(workingMessages);
+  }
+
+  console.log(chalk.yellow(`Usage: Input: ${inputTokens} - Output: ${outputTokens} - Total: ${totalTokens}`));
+  return result.text;
 };
 
 /** INTERFACE */
@@ -110,7 +157,7 @@ const slashCommands: Record<string, SlashCommandHandler> = {
     for (const session of sessions) {
       const current = session.id === activeSession.id ? chalk.cyan(" (current)") : "";
       const updatedAt = new Date(session.updatedAt).toLocaleString();
-      console.log(`${chalk.bold(session.id.slice(0, 8))}${current}  ${updatedAt}  ${session.messageCount} messages  ${session.preview}`);
+      console.log(`${chalk.bold(session.id.slice(0, 8))}${current}  ${updatedAt}  ${session.messageCount} messages  ${session.title || session.preview}`);
     }
     return false;
   },

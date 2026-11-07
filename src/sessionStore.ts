@@ -16,12 +16,22 @@ import type { ModelMessage } from "ai";
 const MESSAGE_ROLES = new Set(["system", "developer", "user", "assistant", "tool"]);
 const SESSION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export type Session = { id: string; messages: ModelMessage[] };
+export type Session = { id: string; messages: ModelMessage[] } & SessionMetadata;
 export type SessionSummary = {
     id: string;
+    createdAt: string;
+    approvedTools: string[];
+    title: string;
     updatedAt: number;
     messageCount: number;
     preview: string;
+};
+
+type SessionMetadata = Pick<SessionSummary, "createdAt" | "approvedTools" | "title">;
+type SessionState = {
+    version: 1;
+    activeSessionId: string;
+    sessions: Record<string, SessionMetadata>;
 };
 
 export class SessionStore {
@@ -39,11 +49,9 @@ export class SessionStore {
     }
 
     resumeOrCreate(): Session {
-        if (existsSync(this.activeFile)) {
-            const activeId = readFileSync(this.activeFile, "utf8").trim();
-            if (SESSION_ID_PATTERN.test(activeId) && existsSync(this.sessionPath(activeId))) {
-                return { id: activeId, messages: this.readMessages(activeId) };
-            }
+        const state = this.readState();
+        if (state && existsSync(this.sessionPath(state.activeSessionId))) {
+            return this.loadSession(state, state.activeSessionId);
         }
         return this.create();
     }
@@ -51,20 +59,35 @@ export class SessionStore {
     create(): Session {
         const id = randomUUID();
         writeFileSync(this.sessionPath(id), "", { flag: "wx" });
-        this.setActive(id);
-        return { id, messages: [] };
+        const state = this.readState() ?? this.emptyState();
+        const metadata = this.newMetadata();
+        state.sessions[id] = metadata;
+        state.activeSessionId = id;
+        this.writeState(state);
+        return { id, messages: [], ...metadata };
     }
 
     restore(idPrefix: string): Session {
         const id = this.resolveId(idPrefix);
-        const session = { id, messages: this.readMessages(id) };
-        this.setActive(id);
-        return session;
+        const state = this.readState() ?? this.emptyState();
+        this.ensureMetadata(state, id);
+        state.activeSessionId = id;
+        this.writeState(state);
+        return this.loadSession(state, id);
     }
 
     append(id: string, message: ModelMessage): void {
         appendFileSync(this.sessionPath(id), `${JSON.stringify(message)}\n`, "utf8");
-        this.setActive(id);
+        const state = this.readState() ?? this.emptyState();
+        const metadata = this.ensureMetadata(state, id);
+        if (message.role === "user" && metadata.title === "Nuova sessione") {
+            const content = typeof message.content === "string"
+                ? message.content
+                : message.content.map((part) => part.type === "text" ? part.text : "").join(" ");
+            metadata.title = content.replace(/\s+/g, " ").trim().slice(0, 100) || metadata.title;
+        }
+        state.activeSessionId = id;
+        this.writeState(state);
     }
 
     replace(id: string, messages: ModelMessage[]): void {
@@ -77,13 +100,25 @@ export class SessionStore {
         } finally {
             if (existsSync(temporaryFile)) unlinkSync(temporaryFile);
         }
-        this.setActive(id);
+        const state = this.readState() ?? this.emptyState();
+        this.ensureMetadata(state, id);
+        state.activeSessionId = id;
+        this.writeState(state);
+    }
+
+    approveTools(id: string, tools: string[]): void {
+        const state = this.readState() ?? this.emptyState();
+        this.ensureMetadata(state, id).approvedTools = [...new Set(tools)];
+        state.activeSessionId = id;
+        this.writeState(state);
     }
 
     list(): SessionSummary[] {
-        return this.sessionIds()
+        const state = this.readState() ?? this.emptyState();
+        const sessions = this.sessionIds()
             .map((id) => {
                 const messages = this.readMessages(id);
+                const metadata = this.ensureMetadata(state, id);
                 const firstUserMessage = messages.find((message) => message.role === "user");
                 const content = firstUserMessage?.content;
                 const preview = (typeof content === "string"
@@ -97,12 +132,15 @@ export class SessionStore {
 
                 return {
                     id,
+                    ...metadata,
                     updatedAt: statSync(this.sessionPath(id)).mtimeMs,
                     messageCount: messages.length,
                     preview,
                 };
             })
             .sort((left, right) => right.updatedAt - left.updatedAt);
+        if (state.activeSessionId) this.writeState(state);
+        return sessions;
     }
 
     private readMessages(id: string): ModelMessage[] {
@@ -150,8 +188,89 @@ export class SessionStore {
         return path.join(this.sessionsDirectory, `${id}.jsonl`);
     }
 
-    private setActive(id: string): void {
-        writeFileSync(this.activeFile, `${id}\n`, "utf8");
+    private loadSession(state: SessionState, id: string): Session {
+        const metadata = this.ensureMetadata(state, id);
+        this.writeState(state);
+        return { id, messages: this.readMessages(id), ...metadata };
+    }
+
+    private readState(): SessionState | undefined {
+        if (!existsSync(this.activeFile)) return undefined;
+        const contents = readFileSync(this.activeFile, "utf8").trim();
+        if (SESSION_ID_PATTERN.test(contents)) {
+            const state = this.emptyState(contents);
+            this.ensureMetadata(state, contents);
+            this.writeState(state);
+            return state;
+        }
+
+        let value: unknown;
+        try {
+            value = JSON.parse(contents);
+        } catch {
+            throw new Error(`Invalid session metadata in ${this.activeFile}`);
+        }
+        if (
+            typeof value !== "object" || value === null ||
+            !("version" in value) || value.version !== 1 ||
+            !("activeSessionId" in value) || typeof value.activeSessionId !== "string" ||
+            !SESSION_ID_PATTERN.test(value.activeSessionId) ||
+            !("sessions" in value) || typeof value.sessions !== "object" || value.sessions === null
+        ) {
+            throw new Error(`Invalid session metadata in ${this.activeFile}`);
+        }
+
+        const sessions: Record<string, SessionMetadata> = {};
+        for (const [id, metadata] of Object.entries(value.sessions)) {
+            if (
+                !SESSION_ID_PATTERN.test(id) || typeof metadata !== "object" || metadata === null ||
+                !("createdAt" in metadata) || typeof metadata.createdAt !== "string" ||
+                !("approvedTools" in metadata) || !Array.isArray(metadata.approvedTools) ||
+                !metadata.approvedTools.every((tool: unknown): tool is string => typeof tool === "string") ||
+                !("title" in metadata) || typeof metadata.title !== "string"
+            ) {
+                throw new Error(`Invalid metadata for session ${id}`);
+            }
+            sessions[id] = {
+                createdAt: metadata.createdAt,
+                approvedTools: metadata.approvedTools,
+                title: metadata.title,
+            };
+        }
+        return { version: 1, activeSessionId: value.activeSessionId, sessions };
+    }
+
+    private emptyState(activeSessionId = ""): SessionState {
+        return { version: 1, activeSessionId, sessions: {} };
+    }
+
+    private newMetadata(): SessionMetadata {
+        return { createdAt: new Date().toISOString(), approvedTools: [], title: "Nuova sessione" };
+    }
+
+    private ensureMetadata(state: SessionState, id: string): SessionMetadata {
+        if (!state.sessions[id]) {
+            const file = this.sessionPath(id);
+            const firstUserMessage = existsSync(file)
+                ? this.readMessages(id).find((message) => message.role === "user")
+                : undefined;
+            const content = firstUserMessage?.content;
+            const title = typeof content === "string"
+                ? content
+                : Array.isArray(content)
+                    ? content.map((part) => part.type === "text" ? part.text : "").join(" ")
+                    : "";
+            state.sessions[id] = {
+                createdAt: existsSync(file) ? statSync(file).birthtime.toISOString() : new Date().toISOString(),
+                approvedTools: [],
+                title: title.replace(/\s+/g, " ").trim().slice(0, 100) || "Nuova sessione",
+            };
+        }
+        return state.sessions[id]!;
+    }
+
+    private writeState(state: SessionState): void {
+        writeFileSync(this.activeFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
     }
 
     private ensureGitIgnore(): void {

@@ -1,6 +1,6 @@
-# CorbeAgent
+# Corbe Code
 
-CorbeAgent è un coding agent da terminale, realizzato in TypeScript con Vercel AI SDK e OpenRouter. Mantiene la conversazione durante la sessione, usa tool per esplorare e modificare il workspace.
+Corbe Code è un coding agent da terminale, realizzato in TypeScript con Vercel AI SDK e OpenRouter. Mantiene la conversazione durante la sessione, usa tool per esplorare e modificare il workspace.
 
 ## Configurazione
 
@@ -31,11 +31,11 @@ npm run build
 npm link
 ```
 
-Poi, da qualsiasi cartella, avvia `corbeagent` (workspace corrente) oppure `corbeagent --workspace "C:\\percorso\\al\\progetto"`. La chiave OpenRouter e il modello vengono letti dal file `.env` nella cartella da cui lanci il comando.
+Poi, da qualsiasi cartella, avvia `corbecode` (workspace corrente) oppure `corbecode --workspace "C:\\percorso\\al\\progetto"`. La chiave OpenRouter e il modello vengono letti dal file `.env` nella cartella da cui lanci il comando.
 
 ```sh
-corbeagent --help
-corbeagent --version
+corbecode --help
+corbecode --version
 ```
 
 Per controllare i tipi e generare il bundle in `dist/`:
@@ -44,11 +44,11 @@ Per controllare i tipi e generare il bundle in `dist/`:
 npm run build
 ```
 
-Le sessioni sono salvate come JSONL in `.corbeagent/sessions/` nel workspace; `.corbeagent/.gitignore` esclude i dati di sessione e il puntatore alla sessione attiva dal versionamento.
+Le sessioni sono salvate come JSONL in `.corbeagent/sessions/`; `.corbeagent/active-session` contiene i metadati JSON di tutte le sessioni (ID attivo, data di creazione, tool approvati e titolo). Il vecchio puntatore testuale viene migrato automaticamente. `.corbeagent/.gitignore` esclude questi dati dal versionamento.
 
 ## Funzionamento
 
-All'avvio CorbeAgent mostra nome, versione e modello. Se presente, `AGENTS.md` nella root del workspace viene aggiunto al contesto del modello. Ogni richiesta viene inviata al modello insieme alla cronologia della sessione e ai tool disponibili. Se il modello invoca un tool, il programma registra nome, input, esito e durata; gli output dei log sono limitati a 500 caratteri. A fine risposta mostra l'utilizzo dei token.
+All'avvio Corbe Code mostra nome, versione e modello. Se presente, `AGENTS.md` nella root del workspace viene aggiunto al contesto del modello. Prima di eseguire `shell`, `edit_file` o `write_file`, Corbe Code mostra l'azione proposta e chiede conferma; è possibile approvare una singola azione, rifiutarla o accettare sempre le modifiche per il workspace nella sessione corrente. L'accettazione persistente è salvata nei metadati della sessione e resta valida dopo il riavvio. Gli altri tool non modificano il workspace e vengono eseguiti senza conferma. Ogni richiesta viene inviata al modello insieme alla cronologia della sessione e ai tool disponibili. Se il modello invoca un tool, il programma registra nome, input, esito e durata; gli output dei log sono limitati a 500 caratteri. A fine risposta mostra l'utilizzo dei token.
 
 Il modello usa `ask_user_input` solo quando manca un'informazione decisiva che non può ricavare dal workspace. I prompt condividono l'input del terminale con la chat; scelte invalide vengono ripetute e i default devono corrispondere a una delle opzioni.
 
