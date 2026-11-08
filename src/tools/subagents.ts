@@ -9,6 +9,7 @@ import { askTerminal, getApprovalDecision } from "../terminalInput";
 import { selectAgentTools, type CustomAgent } from "../agents";
 import { readWorkspaceInstructions } from "../workspaceInstructions";
 import { writeMessage, writeVerbose, writeToolOutput, writeActionPreview } from "../terminalUi";
+import { formatToolActivity } from "../toolActivity";
 
 const MUTATING_TOOLS = ["shell", "edit_file", "write_file"];
 
@@ -54,6 +55,7 @@ export const runSubagent = async (
         },
         onToolExecutionStart: ({ toolCall }) => {
             spinner.stop();
+            writeMessage(chalk.gray(`  ↳ ${formatToolActivity(toolCall.toolName, toolCall.input)}`));
             writeVerbose(lavender(`Subagent tool started: ${toolCall.toolName} (${toolCall.toolCallId})`));
             writeVerbose(chalk.gray(`Input: ${JSON.stringify(toolCall.input).slice(0, 100)}`));
             spinner.start(`Subagent running ${toolCall.toolName}`);

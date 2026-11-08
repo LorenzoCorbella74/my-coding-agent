@@ -69,6 +69,7 @@ test("spaces the header and separates hints from conversation messages", () => {
         assert.equal(lines[0], "CORBE CODE");
         assert.equal(lines[1], "");
         assert.equal(lines[2], "Enter: invia");
+        assert.equal(visibleWidth(ui.transcript.render(80)[2] ?? ""), 80);
         const message = lines.indexOf("first message");
         assert.ok(lines.slice(3, message).some((line) => /[─━-]{3}/.test(line)));
         assert.equal(lines[message - 1], "");

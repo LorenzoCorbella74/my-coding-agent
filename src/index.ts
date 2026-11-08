@@ -12,6 +12,7 @@ import { SessionStore } from "./sessionStore";
 import { SKILLS_DESCRIPTIONS, AGENTS_DESCRIPTIONS, getSkillsTable } from "./tools";
 import { readWorkspaceInstructions } from "./workspaceInstructions";
 import { startTerminalUi, writeMessage, writeVerbose, writeToolOutput, writeActionPreview } from "./terminalUi";
+import { formatToolActivity } from "./toolActivity";
 
 const formatTokenCount = (count: number): string => String(count).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 
@@ -87,6 +88,7 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
     },
     onToolExecutionStart: ({ toolCall }) => {
       spinner.stop();
+      writeMessage(lavender(formatToolActivity(toolCall.toolName, toolCall.input)));
       writeVerbose(lavender(`Tool started: ${toolCall.toolName} (${toolCall.toolCallId})`));
       writeVerbose(chalk.gray(`Input: ${JSON.stringify(toolCall.input).slice(0, 500)}`));
       spinner.start(`Running ${toolCall.toolName}`);
@@ -297,7 +299,7 @@ ui.writeHeader([
   "| |  | | | | |_) |  _ \\|  _|   | |  | | | | | | |  _|",
   "| |__| |_| |  _ <| |_) | |___  | |__| |_| | |_| | |___",
   " \\____\\___/|_| \\_\\____/|_____|  \\____\\___/|____/|_____|",
-].join("\n"), "Enter: invia | Alt+Enter: nuova riga | /: comandi | @: file | PgUp/PgDn: cronologia | Ctrl+C: annulla/esci");
+].join("\n"), "Enter: invia·Alt+Enter: nuova riga·/: comandi·@: file·PgUp/PgDn: cronologia·Ctrl+C: annulla/esci");
 const updateFooter = () => ui.setFooter(`Version ${packageJson.version} | Model: ${MODEL} | Session ${activeSession.id.slice(0, 8)}`);
 updateFooter();
 try {

@@ -216,7 +216,7 @@ export class TerminalUi {
     writeHeader(title: string, hint: string): void {
         this.write(chalk.bold.cyan(title));
         this.transcript.addChild(new Spacer(1));
-        this.write(chalk.gray(hint));
+        this.transcript.addChild(new Text(chalk.hex("#F8F8F2")(hint), 1, 0, chalk.bgHex("#44475A")));
         this.write("---", "markdown");
         this.transcript.addChild(new Spacer(1));
         this.tui.requestRender();
