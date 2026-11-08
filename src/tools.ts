@@ -137,6 +137,12 @@ export const TOOLS = {
 
 const AGENTS = new AgentLoader(WORKDIR, TOOLS);
 export const AGENTS_DESCRIPTIONS = AGENTS.getDescriptions();
+const GENERAL_PURPOSE_AGENT = "general-purpose";
+const resolveAgent = (name: string | undefined) => {
+    if (name === undefined) return undefined;
+    if (name === GENERAL_PURPOSE_AGENT && !AGENTS.has(name)) return undefined;
+    return AGENTS.get(name);
+};
 
 
 export const createParentTools = (
@@ -155,6 +161,6 @@ export const createParentTools = (
                 agent: z.string().optional().describe("Name of a custom agent from the available agents list; omit for a general-purpose subagent"),
             }),
         ),
-        execute: async ({ task, agent }) => runSubagent(task, activeSession, spinner, approveTools, agent === undefined ? undefined : AGENTS.get(agent), abortSignal),
+        execute: async ({ task, agent }) => runSubagent(task, activeSession, spinner, approveTools, resolveAgent(agent), abortSignal),
     }),
 });

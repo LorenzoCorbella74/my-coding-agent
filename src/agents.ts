@@ -71,6 +71,10 @@ export class AgentLoader {
         ).join("\n") || "(no custom agents available)";
     }
 
+    has(name: string): boolean {
+        return this.agents.has(name);
+    }
+
     get(name: string): CustomAgent {
         const agent = this.agents.get(name);
         if (!agent) throw new Error(`Custom agent not found: ${name}`);

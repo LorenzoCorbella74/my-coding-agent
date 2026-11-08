@@ -57,7 +57,7 @@ export const runSubagent = async (
             },
             onToolExecutionStart: ({ toolCall }) => {
                 spinner.stop();
-                writeMessage(chalk.gray(`  ↳ ${formatToolActivity(toolCall.toolName, toolCall.input)}`));
+                writeMessage(chalk.bold.gray(`  ↳ ${formatToolActivity(toolCall.toolName, toolCall.input)}`));
                 writeVerbose(lavender(`Subagent tool started: ${toolCall.toolName} (${toolCall.toolCallId})`));
                 writeVerbose(chalk.gray(`Input: ${JSON.stringify(toolCall.input).slice(0, 100)}`));
                 spinner.start(`Subagent running ${toolCall.toolName}`);

@@ -199,7 +199,7 @@ export class TerminalUi {
         } else if (kind === "markdown") {
             this.transcript.addChild(renderMarkdown(text));
         } else {
-            this.transcript.addChild(new Text(kind === "user" ? chalk.bold.cyan(`YOU > ${text}`) : text, 1, 0));
+            this.transcript.addChild(new Text(kind === "user" ? `${chalk.bold.cyan("YOU > ")}${chalk.white(text)}` : text, 1, 0));
         }
         this.tui.requestRender();
     }

@@ -90,7 +90,7 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
     },
     onToolExecutionStart: ({ toolCall }) => {
       spinner.stop();
-      writeMessage(lavender(formatToolActivity(toolCall.toolName, toolCall.input)));
+      writeMessage(chalk.bold(lavender(formatToolActivity(toolCall.toolName, toolCall.input))));
       writeVerbose(lavender(`Tool started: ${toolCall.toolName} (${toolCall.toolCallId})`));
       writeVerbose(chalk.gray(`Input: ${JSON.stringify(toolCall.input).slice(0, 500)}`));
       spinner.start(`Running ${toolCall.toolName}`);
