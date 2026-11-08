@@ -68,6 +68,8 @@ export const createAutocomplete = (workspace: string, commands: SlashCommand[]):
 
 export const renderMarkdown = (text: string) => new Markdown(text, 1, 0, markdownTheme);
 
+const highlightedLabel = (text: string) => new Text(chalk.hex("#F8F8F2")(text), 1, 0, chalk.bgHex("#44475A"));
+
 class ChatEditor extends Editor {
     showUserPrefix = false;
 
@@ -194,7 +196,7 @@ export class TerminalUi {
 
     write(text = "", kind: "log" | "user" | "assistant" | "markdown" = "log"): void {
         if (kind === "assistant") {
-            this.transcript.addChild(new Text(chalk.bold.cyan("CORBE CODE"), 1, 0));
+            this.transcript.addChild(highlightedLabel("CORBE CODE"));
             this.transcript.addChild(renderMarkdown(text));
         } else if (kind === "markdown") {
             this.transcript.addChild(renderMarkdown(text));
@@ -209,8 +211,8 @@ export class TerminalUi {
         this.tui.requestRender();
     }
 
-    startTextStream(label: string): (delta: string) => void {
-        this.transcript.addChild(new Text(label, 1, 0));
+    startTextStream(label: string, highlighted = false): (delta: string) => void {
+        this.transcript.addChild(highlighted ? highlightedLabel(label) : new Text(label, 1, 0));
         const block = renderMarkdown("");
         this.transcript.addChild(block);
         let text = "";
@@ -228,7 +230,7 @@ export class TerminalUi {
     writeHeader(title: string, hint: string): void {
         this.write(chalk.bold.cyan(title));
         this.transcript.addChild(new Spacer(1));
-        this.transcript.addChild(new Text(chalk.hex("#F8F8F2")(hint), 1, 0, chalk.bgHex("#44475A")));
+        this.transcript.addChild(new Text(chalk.gray(hint), 1, 0));
         this.write("---", "markdown");
         this.transcript.addChild(new Spacer(1));
         this.tui.requestRender();
@@ -300,6 +302,6 @@ export const getTerminalUi = (): TerminalUi => {
 };
 export const writeMessage = (text = "", kind: "log" | "user" | "assistant" | "markdown" = "log"): void => getTerminalUi().write(text, kind);
 export const writeVerbose = (text: string): void => getTerminalUi().writeVerbose(text);
-export const startTextStream = (label: string): ((delta: string) => void) => getTerminalUi().startTextStream(label);
+export const startTextStream = (label: string, highlighted = false): ((delta: string) => void) => getTerminalUi().startTextStream(label, highlighted);
 export const writeToolOutput = (output: string, limit: number, failed = false): void => getTerminalUi().writeToolOutput(output, limit, failed);
 export const writeActionPreview = (toolName: string, input: unknown): void => getTerminalUi().writeActionPreview(toolName, input);

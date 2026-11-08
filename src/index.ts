@@ -111,7 +111,7 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
     await consumeTextStream(result.fullStream, {
       onTextStart: () => {
         spinner.stop();
-        appendDelta = startTextStream(chalk.bold.cyan("CORBE CODE"));
+        appendDelta = startTextStream("CORBE CODE", true);
       },
       onTextDelta: (delta) => appendDelta(delta),
     });
