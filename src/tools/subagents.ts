@@ -1,4 +1,4 @@
-import { streamText, isLoopFinished, type ModelMessage } from "ai";
+import { streamText, isLoopFinished, isStepCount, type ModelMessage, type ToolSet } from "ai";
 import { consumeTextStream } from "../agentStream";
 import { api, MODEL, WORKDIR } from "../config";
 import { TOOLS } from "../tools";
@@ -21,15 +21,19 @@ export const runSubagent = async (
     approveTools: (tools: string[]) => void,
     agent?: CustomAgent,
     abortSignal?: AbortSignal,
+    options: { tools?: ToolSet; system?: string; shouldStop?: () => boolean; forceShellApproval?: boolean } = {},
 ): Promise<string> => {
+    const label = `Subagent ${agent?.name ?? "Generic"}`;
+    spinner.start(`${label} thinking...`);
     const messages: ModelMessage[] = [{ role: "user", content: prompt }];
     const workspaceInstructions = await readWorkspaceInstructions(WORKDIR);
-    const tools = selectAgentTools(TOOLS, agent?.tools);
+    const tools = options.tools ?? selectAgentTools(TOOLS, agent?.tools);
     const system = [
         `You are ${agent?.name ?? "a coding subagent"} at ${WORKDIR}. 
         Complete your given task, then summarize your findings.`,
         workspaceInstructions,
         agent?.body ?? "",
+        options.system ?? "",
     ].filter(Boolean).join("\n\n");
     const generate = async () => {
         const result = streamText({
@@ -38,9 +42,9 @@ export const runSubagent = async (
             system,
             messages,
             tools,
-            stopWhen: isLoopFinished(),
+            stopWhen: options.shouldStop ? [isLoopFinished(), options.shouldStop, isStepCount(100)] : isLoopFinished(),
             toolApproval: {
-                shell: () => activeSession.approvedTools.includes("shell") ? "approved" : "user-approval",
+                shell: () => !options.forceShellApproval && activeSession.approvedTools.includes("shell") ? "approved" : "user-approval",
                 edit_file: () => activeSession.approvedTools.includes("edit_file") ? "approved" : "user-approval",
                 write_file: () => activeSession.approvedTools.includes("write_file") ? "approved" : "user-approval",
             },
@@ -49,28 +53,27 @@ export const runSubagent = async (
                 if (Array.isArray(reasoningDetails) && reasoningDetails.length > 0) {
                     spinner.stop();
                     for (const detail of reasoningDetails) {
-                        writeMessage(`${chalk.bold.cyan("Reasoning details:")} ${chalk.gray(detail.text ?? detail.summary ?? JSON.stringify(detail))}`);
+                        writeMessage(`${chalk.bold.cyan(`${label} reasoning details:`)} ${chalk.gray(detail.text ?? detail.summary ?? JSON.stringify(detail))}`);
                         writeMessage();
                     }
-                    spinner.start("Subagent thinking...");
+                    spinner.start(`${label} thinking...`);
                 }
             },
             onToolExecutionStart: ({ toolCall }) => {
                 spinner.stop();
-                writeMessage(chalk.bold.gray(`  ↳ ${formatToolActivity(toolCall.toolName, toolCall.input)}`));
-                writeVerbose(lavender(`Subagent tool started: ${toolCall.toolName} (${toolCall.toolCallId})`));
-                writeVerbose(chalk.gray(`Input: ${JSON.stringify(toolCall.input).slice(0, 100)}`));
-                spinner.start(`Subagent running ${toolCall.toolName}`);
+                writeVerbose(lavender(`${label} tool started: ${toolCall.toolName} (${toolCall.toolCallId})`));
+                writeVerbose(chalk.gray(`${label} input: ${JSON.stringify(toolCall.input).slice(0, 100)}`));
+                spinner.start(`${label} running ${toolCall.toolName}`);
             },
             onToolExecutionEnd: ({ toolCall, toolExecutionMs, toolOutput }) => {
                 spinner.stop();
                 const failed = toolOutput.type === "tool-error";
                 const output = failed ? String(toolOutput.error) : String(toolOutput.output);
-                const status = `Subagent tool ${failed ? "failed" : "completed"}: ${toolCall.toolName} (${toolExecutionMs} ms)`;
+                const status = `${label} tool ${failed ? "failed" : "completed"}: ${toolCall.toolName} (${toolExecutionMs} ms)`;
                 if (failed) writeMessage(chalk.red(status));
                 else writeVerbose(lavender(status));
-                writeToolOutput(output, 100, failed);
-                spinner.start("Subagent thinking");
+                writeToolOutput(output, 100, failed, label);
+                spinner.start(`${label} thinking...`);
             },
         });
 
@@ -78,9 +81,10 @@ export const runSubagent = async (
         await consumeTextStream(result.fullStream, {
             onTextStart: () => {
                 spinner.stop();
-                appendDelta = startTextStream(chalk.gray(`  ↳ ${agent?.name ?? "subagent"}`));
+                appendDelta = startTextStream(chalk.gray(`  ↳ ${label}`));
             },
             onTextDelta: (delta) => appendDelta(delta),
+            onToolCall: (toolName, input) => writeMessage(chalk.bold.gray(`  ↳ ${label} ${formatToolActivity(toolName, input)}`)),
         });
         return {
             text: await result.text,
@@ -91,6 +95,7 @@ export const runSubagent = async (
 
     let result = await generate();
     while (true) {
+        if (options.shouldStop?.()) return result.text;
         const hasApprovalRequests = result.content.some(
             (part) => part.type === "tool-approval-request" && !part.isAutomatic,
         );
@@ -100,18 +105,19 @@ export const runSubagent = async (
         const approvalResponses = [];
         for (const request of result.content) {
             if (request.type !== "tool-approval-request" || request.isAutomatic) continue;
-            writeMessage(lavender(`\nAzione proposta dal subagent: ${request.toolCall.toolName}`));
+            const isShell = request.toolCall.toolName === "shell";
+            writeMessage(lavender(`\n${label}${isShell ? "" : ` azione proposta: ${request.toolCall.toolName}`}`));
             writeActionPreview(request.toolCall.toolName, request.toolCall.input);
             spinner.stop();
-            const answer = await askTerminal(chalk.cyan("Eseguire? [s]ì / [n]o / [a]ccetta sempre in questo workspace per questa sessione: "));
-            spinner.start("Subagent thinking");
+            const answer = await askTerminal(chalk.cyan(`${isShell ? "" : `${label} - Eseguire? `}[s]ì / [n]o / [a]ccetta sempre in questo workspace per questa sessione: `));
+            spinner.start(`${label} thinking...`);
             const decision = getApprovalDecision(answer);
             const approved = decision !== "deny";
             if (decision === "always") {
                 approveTools(MUTATING_TOOLS);
                 activeSession.approvedTools = MUTATING_TOOLS;
             }
-            if (!approved) writeMessage(lavender("Azione rifiutata."));
+            if (!approved) writeMessage(lavender(`${label} azione rifiutata.`));
             approvalResponses.push({
                 type: "tool-approval-response" as const,
                 approvalId: request.approvalId,

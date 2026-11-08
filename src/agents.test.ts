@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { AgentLoader, selectAgentTools } from "./agents";
+import { AgentLoader, DEFAULT_AGENTS, selectAgentTools, selectDiscussionTools, selectFlowTools } from "./agents";
 import { parseFrontmatter } from "./frontmatter";
 
 const tools = {
@@ -16,7 +16,7 @@ test("loads Copilot-style YAML agents and enforces tool permissions", () => {
     const directory = path.join(workspace, ".corbecode", "agents");
     mkdirSync(directory, { recursive: true });
     try {
-        assert.equal(new AgentLoader(workspace, tools).getDescriptions(), "(no custom agents available)");
+        assert.match(new AgentLoader(workspace, tools).getDescriptions(), /Planner: Analyze requests/);
         writeFileSync(path.join(directory, "review.agent.md"), [
             "---", 'name: "Reviewer"', "description: >-", "  Review code:",
             "  find correctness bugs.", "tools:", "  - read", "  - search",
@@ -77,4 +77,31 @@ test("accepts boolean user-invocable without disabling subagent discovery", () =
     } finally {
         rmSync(workspace, { recursive: true, force: true });
     }
+});
+
+test("ships four default agents and supports explicit workflow role mapping", () => {
+    const workspace = mkdtempSync(path.join(tmpdir(), "corbecode-default-agents-"));
+    try {
+        const loader = new AgentLoader(workspace, tools);
+        for (const role of ["Planner", "Developer", "Verifier", "Reviewer"] as const) {
+            assert.equal(loader.getFlowAgent(role, workspace), DEFAULT_AGENTS[role]);
+        }
+        assert.equal(Object.hasOwn(selectAgentTools(tools, DEFAULT_AGENTS.Planner.tools), "shell"), false);
+        assert.equal(Object.hasOwn(selectAgentTools(tools, DEFAULT_AGENTS.Verifier.tools), "edit_file"), false);
+        writeFileSync(path.join(workspace, ".corbecode", "flow-agents.json"), JSON.stringify({ Planner: "Reviewer" }));
+        assert.equal(loader.getFlowAgent("Planner", workspace).name, "Reviewer");
+        writeFileSync(path.join(workspace, ".corbecode", "flow-agents.json"), JSON.stringify({ Planner: "missing" }));
+        assert.throws(() => loader.getFlowAgent("Planner", workspace), /not found/);
+    } finally {
+        rmSync(workspace, { recursive: true, force: true });
+    }
+});
+
+test("workflow role caps cannot be bypassed by custom agents or chat delegation", () => {
+    const unrestricted = { ...DEFAULT_AGENTS.Developer, tools: ["*"] };
+    assert.deepEqual(Object.keys(selectFlowTools(tools, "Planner", unrestricted)), ["read_file", "read_files", "explore_workspace", "searchCode", "skill_get"]);
+    assert.equal(Object.hasOwn(selectFlowTools(tools, "Verifier", unrestricted), "edit_file"), false);
+    assert.equal(Object.hasOwn(selectFlowTools(tools, "Reviewer", unrestricted), "shell"), false);
+    const discussion = selectDiscussionTools({ ...tools, task: {} });
+    for (const name of ["shell", "edit_file", "write_file", "task"]) assert.equal(Object.hasOwn(discussion, name), false);
 });

@@ -9,6 +9,10 @@ import { ProcessTerminal, stripTerminalSequences, visibleWidth } from "@earendil
 import { createAutocomplete, renderMarkdown, TerminalUi } from "./terminalUi";
 import { getSKILLS_DIR, setSKILLS_DIR, SkillLoader } from "./skills";
 import { getActionPreview } from "./actionPreview";
+import { consumeTextStream } from "./agentStream";
+import { formatToolActivity } from "./toolActivity";
+import type { TextStreamPart, ToolSet } from "ai";
+import { executeCommandWithResult } from "./tools/commands";
 
 class TestTerminal extends ProcessTerminal {
     input: ((data: string) => void) | undefined;
@@ -25,14 +29,14 @@ class TestTerminal extends ProcessTerminal {
     }
     override stop(): void { this.stopped = true; }
     override write(data: string): void { this.output += data; }
-    override moveBy(): void {}
-    override hideCursor(): void {}
-    override showCursor(): void {}
-    override clearLine(): void {}
-    override clearFromCursor(): void {}
-    override clearScreen(): void {}
-    override setProgress(): void {}
-    override restoreOnExit(): void {}
+    override moveBy(): void { }
+    override hideCursor(): void { }
+    override showCursor(): void { }
+    override clearLine(): void { }
+    override clearFromCursor(): void { }
+    override clearScreen(): void { }
+    override setProgress(): void { }
+    override restoreOnExit(): void { }
 }
 
 test("toggles verbose tool details without hiding outputs or errors", () => {
@@ -56,6 +60,55 @@ test("toggles verbose tool details without hiding outputs or errors", () => {
         assert.match(rendered, /result/);
         assert.match(rendered, /Tool failed: error/);
     } finally {
+        ui.close();
+    }
+});
+
+test("shows tool activity before its streamed result even with verbose disabled", async () => {
+    const terminal = new TestTerminal();
+    const ui = new TerminalUi(tmpdir(), [], terminal);
+    let release = () => { };
+    let activityReady = () => { };
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const ready = new Promise<void>((resolve) => { activityReady = resolve; });
+    let consumption: Promise<void> | undefined;
+    try {
+        ui.start();
+        const stream: AsyncIterable<TextStreamPart<ToolSet>> = {
+            async *[Symbol.asyncIterator]() {
+                yield { type: "text-start", id: "1" };
+                yield { type: "text-delta", id: "1", text: "Inspecting files" };
+                yield { type: "text-end", id: "1" };
+                yield { type: "tool-call", toolCallId: "read-1", toolName: "read_file", input: { filePath: "src/index.ts" } } as TextStreamPart<ToolSet>;
+                await gate;
+                yield { type: "text-start", id: "2" };
+                yield { type: "text-delta", id: "2", text: "File inspected" };
+            },
+        };
+        let appendDelta = (_delta: string) => { };
+        consumption = consumeTextStream(stream, {
+            onTextStart: () => { appendDelta = ui.startTextStream("CORBE CODE", true); },
+            onTextDelta: (delta) => appendDelta(delta),
+            onToolCall: (toolName, input) => {
+                ui.write(chalk.bold(lavender(formatToolActivity(toolName, input))));
+                activityReady();
+            },
+        });
+        await ready;
+        ui.tui.renderNow();
+        const frame = ui.tui.getScreenLines().map(stripTerminalSequences).join("\n");
+        assert.equal(ui.verbose, false);
+        assert.match(frame, /read: src\/index\.ts/);
+        assert.doesNotMatch(frame, /File inspected/);
+        release();
+        await consumption;
+        const transcript = ui.transcript.render(80).map(stripTerminalSequences).join("\n");
+        assert.equal(transcript.match(/read: src\/index\.ts/g)?.length, 1);
+        assert.ok(transcript.indexOf("Inspecting files") < transcript.indexOf("read: src/index.ts"));
+        assert.ok(transcript.indexOf("read: src/index.ts") < transcript.indexOf("File inspected"));
+    } finally {
+        release();
+        await consumption;
         ui.close();
     }
 });
@@ -194,18 +247,142 @@ test("selects sessions with arrows and Enter and cancels with Escape", async () 
     try {
         ui.start();
         const items = [{ value: "first", label: "First" }, { value: "second", label: "Second" }];
+        for (let index = 0; index < 60; index += 1) ui.write(`message ${index}`);
         const selected = ui.select("Sessions", items);
+        ui.tui.renderNow();
+        const frame = ui.tui.getScreenLines().map(stripTerminalSequences);
+        assert.equal(ui.tui.hasOverlay(), false);
+        assert.ok(frame.findIndex((line) => line.includes("message 59")) < frame.findIndex((line) => line.includes("Sessions")));
+        assert.ok(frame.findIndex((line) => line.includes("Sessions")) >= terminal.height - 6);
         terminal.input?.("\x1b[B");
         terminal.input?.("\r");
         assert.equal(await selected, "second");
+        assert.match(ui.transcript.render(80).map(stripTerminalSequences).join("\n"), /Sessions: Second/);
         assert.equal(ui.tui.hasOverlay(), false);
         const cancelled = ui.select("Sessions", items);
         terminal.input?.("\x1b");
         assert.equal(await cancelled, undefined);
+        const answer = ui.ask("YOU >");
+        const pendingSelection = ui.select("Confirm", items);
+        assert.equal(ui.editor.disableSubmit, true);
+        terminal.input?.("\x1b");
+        await pendingSelection;
+        assert.equal(ui.editor.disableSubmit, false);
+        terminal.input?.("next");
+        terminal.input?.("\r");
+        assert.equal(await answer, "next");
         const closed = ui.select("Sessions", items);
         ui.close();
         assert.equal(await closed, undefined);
     } finally {
+        ui.close();
+    }
+});
+
+test("keeps loading visible after workflow and tool approval with a full transcript", async () => {
+    const terminal = new TestTerminal();
+    const ui = new TerminalUi(tmpdir(), [], terminal);
+    try {
+        ui.start();
+        for (let index = 0; index < 60; index += 1) ui.write(`message ${index}`);
+        const command = ui.ask("YOU >");
+        terminal.input?.("/flow:apply");
+        terminal.input?.("\r");
+        await command;
+        const approval = ui.select("Approve the plan?", [{ value: "yes", label: "Confirm" }]);
+        ui.tui.renderNow();
+        terminal.input?.("\r");
+        assert.equal(await approval, "yes");
+        ui.setStatus("Developer thinking");
+        ui.tui.renderNow();
+        assert.match(ui.tui.getScreenLines().map(stripTerminalSequences).join("\n"), /Developer thinking/);
+        ui.clearStatus();
+        const toolApproval = ui.ask("Execute? [s/N]");
+        ui.tui.renderNow();
+        terminal.input?.("s");
+        terminal.input?.("\r");
+        assert.equal(await toolApproval, "s");
+        ui.setStatus("Subagent thinking");
+        ui.tui.renderNow();
+        assert.match(ui.tui.getScreenLines().map(stripTerminalSequences).join("\n"), /Subagent thinking/);
+        assert.equal(ui.editor.disableSubmit, true);
+        ui.clearStatus();
+        const next = ui.ask("YOU >");
+        terminal.input?.("next");
+        terminal.input?.("\r");
+        assert.equal(await next, "next");
+    } finally {
+        ui.close();
+    }
+});
+
+test("resizes inline selections while preserving the selected item and transcript scrolling", async () => {
+    const terminal = new TestTerminal();
+    const ui = new TerminalUi(tmpdir(), [], terminal);
+    try {
+        ui.start();
+        for (let index = 0; index < 60; index += 1) ui.write(`message ${index}`);
+        ui.setFooter("Session abc | Flow xyz");
+        const items = Array.from({ length: 12 }, (_, index) => ({ value: String(index), label: `Choice ${index}` }));
+        const selected = ui.select("Confirm this change and preserve all the existing implementation tasks and verification results?", items, 8);
+        ui.tui.renderNow();
+        terminal.width = 36;
+        terminal.height = 12;
+        terminal.resize?.();
+        ui.tui.renderNow();
+        let frame = ui.tui.getScreenLines().map(stripTerminalSequences);
+        assert.equal(frame.length, 12);
+        assert.ok(frame.every((line) => visibleWidth(line) <= 36));
+        assert.ok(frame.some((line) => line.includes("message 59")));
+        assert.ok(frame.some((line) => line.includes("Choice 8")));
+        assert.match(frame.at(-1) ?? "", /Session abc/);
+        terminal.input?.("\x1b[5~");
+        ui.tui.renderNow();
+        frame = ui.tui.getScreenLines().map(stripTerminalSequences);
+        assert.ok(!frame.some((line) => line.includes("message 59")));
+        assert.ok(frame.some((line) => line.includes("Choice 8")));
+        terminal.input?.("\x1b[B");
+        terminal.input?.("\r");
+        assert.equal(await selected, "9");
+        assert.equal(ui.tui.hasOverlay(), false);
+    } finally {
+        ui.close();
+    }
+});
+
+test("renders loading and receives interrupts while an approved shell command runs", async () => {
+    const terminal = new TestTerminal();
+    const ui = new TerminalUi(tmpdir(), [], terminal);
+    let execution: Promise<Awaited<ReturnType<typeof executeCommandWithResult>>> | undefined;
+    try {
+        ui.start();
+        const approval = ui.ask("Execute? [s/N]");
+        terminal.input?.("s");
+        terminal.input?.("\r");
+        assert.equal(await approval, "s");
+        ui.setStatus("Subagent running shell");
+        let completed = false;
+        execution = Promise.resolve(executeCommandWithResult('node -e "setTimeout(() => console.log(123), 600)"'));
+        void execution.then(() => { completed = true; });
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        assert.equal(completed, false, "Shell execution must yield to the TUI while the command is still running");
+        ui.tui.renderNow();
+        const firstFrame = ui.tui.getScreenLines().map(stripTerminalSequences).join("\n");
+        assert.match(firstFrame, /Subagent running shell/);
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        ui.tui.renderNow();
+        const secondFrame = ui.tui.getScreenLines().map(stripTerminalSequences).join("\n");
+        assert.notEqual(secondFrame, firstFrame, "Loading must animate during shell execution");
+        let interrupted = false;
+        ui.onInterrupt = () => { interrupted = true; };
+        terminal.input?.("\x03");
+        assert.equal(interrupted, true);
+        assert.equal(completed, false);
+        const result = await execution;
+        assert.equal(result.exitCode, 0);
+        assert.match(result.output, /123/);
+    } finally {
+        await execution;
         ui.close();
     }
 });
@@ -246,6 +423,10 @@ test("renders tool output as Markdown with a separate label and truncation notic
         assert.match(rendered, /output troncato/);
         ui.writeToolOutput("Error: **literal**", 500, true);
         assert.match(ui.transcript.render(80).map(stripTerminalSequences).join("\n"), /Error: \*\*literal\*\*/);
+        ui.writeToolOutput("abcdef", 3, false, "Subagent Planner");
+        rendered = ui.transcript.render(80).map(stripTerminalSequences).join("\n");
+        assert.match(rendered, /Subagent Planner output:/);
+        assert.match(rendered, /Subagent Planner: \.\.\. \(output troncato\)/);
     } finally {
         ui.close();
     }
@@ -279,6 +460,23 @@ test("previews file writes and edits as extension-aware code without escaped JSO
         }
         assert.throws(() => getActionPreview("write_file", { content }), /filePath/);
         assert.equal(getActionPreview("shell", { command: "test" }), undefined);
+    } finally {
+        ui.close();
+    }
+});
+
+test("previews shell approval as a readable question without JSON", () => {
+    const ui = new TerminalUi(tmpdir(), [], new TestTerminal());
+    try {
+        const command = "cd my-app && npx tsc --noEmit 2>&1 | head -50";
+        ui.writeActionPreview("shell", { command });
+        const rendered = ui.transcript.render(160).map(stripTerminalSequences).join("\n");
+        assert.equal(rendered.trim(), `Eseguire "${command}" ?`);
+        assert.doesNotMatch(rendered, /"command":|\{|\}/);
+        ui.writeActionPreview("shell", { command: 'node -e "console.log(1)"\nnode --version' });
+        const multiline = ui.transcript.render(160).map(stripTerminalSequences).join("\n");
+        assert.match(multiline, /node -e "console\.log\(1\)"/);
+        assert.doesNotMatch(multiline, /\\n|\\"/);
     } finally {
         ui.close();
     }

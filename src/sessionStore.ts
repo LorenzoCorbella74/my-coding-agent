@@ -274,7 +274,7 @@ export class SessionStore {
     }
 
     private ensureGitIgnore(): void {
-        const requiredRules = ["sessions/", "active-session"];
+        const requiredRules = ["sessions/", "active-session", "workflows/", "active-flow.json"];
         const existing = existsSync(this.ignoreFile) ? readFileSync(this.ignoreFile, "utf8") : "";
         const lines = new Set(existing.split(/\r?\n/).map((line) => line.trim()));
         const missing = requiredRules.filter((rule) => !lines.has(rule));

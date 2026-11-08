@@ -13,6 +13,9 @@ import { SessionStore } from "./sessionStore";
 import { SKILLS_DESCRIPTIONS, AGENTS_DESCRIPTIONS, getSkillsTable } from "./tools";
 import { readWorkspaceInstructions } from "./workspaceInstructions";
 import { startTerminalUi, startTextStream, writeMessage, writeVerbose, writeToolOutput, writeActionPreview } from "./terminalUi";
+import { FlowStore } from "./flowStore";
+import { FLOW_COMMANDS, FlowController, flowChatContext } from "./flow";
+import { runFlowAgent } from "./flowRuntime";
 import { formatToolActivity } from "./toolActivity";
 
 const formatTokenCount = (count: number): string => String(count).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
@@ -25,7 +28,7 @@ Use tools to solve tasks.
 Use the task tool to delegate exploration or subtasks with fresh context.
 Choose a custom agent by setting the task tool's agent parameter to its exact name when its description matches the task.
 
-Available custom agents:
+Available default and custom agents:
 ${AGENTS_DESCRIPTIONS}
 
 Use explore_workspace to find files without reading contents, and read_files when you need to read multiple files. 
@@ -41,6 +44,8 @@ Act, dont explain or explain briefly if task was long.
 ${workspaceInstructions ? `Workspace instructions from AGENTS.md:\n${workspaceInstructions}` : ""}`;
 
 const sessionStore = new SessionStore(WORKDIR);
+const flowStore = new FlowStore(WORKDIR);
+const recoveredFlow = flowStore.recover();
 let activeSession = sessionStore.resumeOrCreate();
 let history = activeSession.messages;
 const MUTATING_TOOLS = ["shell", "edit_file", "write_file"];
@@ -64,47 +69,46 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
   const workingMessages = [...messages];
   const generate = (inputMessages: ModelMessage[]) => withSpinner("Thinking", async (spinner) => {
     const result = streamText({
-    model: api(MODEL),
-    system: SYSTEM_PROMPT,
-    messages: inputMessages,
-    ...(requestController && { abortSignal: requestController.signal }),
-    tools: createParentTools(activeSession, spinner, (tools) => {
-      sessionStore.approveTools(activeSession.id, tools);
-    }, requestController?.signal),
-    toolApproval: {
-      shell: () => activeSession.approvedTools.includes("shell") ? "approved" : "user-approval",
-      edit_file: () => activeSession.approvedTools.includes("edit_file") ? "approved" : "user-approval",
-      write_file: () => activeSession.approvedTools.includes("write_file") ? "approved" : "user-approval",
-    },
-    stopWhen: isLoopFinished(),
-    onStepFinish: ({ providerMetadata }) => {
-      const reasoningDetails = providerMetadata?.openrouter?.reasoning_details;
-      if (Array.isArray(reasoningDetails) && reasoningDetails.length > 0) {
-        spinner.stop();
-        for (const detail of reasoningDetails) {
-          writeMessage(`${chalk.bold.cyan("Reasoning details:")} ${chalk.gray(detail.text ?? detail.summary ?? JSON.stringify(detail))}`);
-          writeMessage();
+      model: api(MODEL),
+      system: `${SYSTEM_PROMPT}\n\n${flowChatContext(flowStore.current())}`,
+      messages: inputMessages,
+      ...(requestController && { abortSignal: requestController.signal }),
+      tools: createParentTools(activeSession, spinner, (tools) => {
+        sessionStore.approveTools(activeSession.id, tools);
+      }, requestController?.signal, Boolean(flowStore.current())),
+      toolApproval: {
+        shell: () => activeSession.approvedTools.includes("shell") ? "approved" : "user-approval",
+        edit_file: () => activeSession.approvedTools.includes("edit_file") ? "approved" : "user-approval",
+        write_file: () => activeSession.approvedTools.includes("write_file") ? "approved" : "user-approval",
+      },
+      stopWhen: isLoopFinished(),
+      onStepFinish: ({ providerMetadata }) => {
+        const reasoningDetails = providerMetadata?.openrouter?.reasoning_details;
+        if (Array.isArray(reasoningDetails) && reasoningDetails.length > 0) {
+          spinner.stop();
+          for (const detail of reasoningDetails) {
+            writeMessage(`${chalk.bold.cyan("Reasoning details:")} ${chalk.gray(detail.text ?? detail.summary ?? JSON.stringify(detail))}`);
+            writeMessage();
+          }
+          spinner.start("Thinking...");
         }
-        spinner.start("Thinking...");
-      }
-    },
-    onToolExecutionStart: ({ toolCall }) => {
-      spinner.stop();
-      writeMessage(chalk.bold(lavender(formatToolActivity(toolCall.toolName, toolCall.input))));
-      writeVerbose(lavender(`Tool started: ${toolCall.toolName} (${toolCall.toolCallId})`));
-      writeVerbose(chalk.gray(`Input: ${JSON.stringify(toolCall.input).slice(0, 500)}`));
-      spinner.start(`Running ${toolCall.toolName}`);
-    },
-    onToolExecutionEnd: ({ toolCall, toolExecutionMs, toolOutput }) => {
-      spinner.stop();
-      const failed = toolOutput.type === "tool-error";
-      const output = failed ? String(toolOutput.error) : String(toolOutput.output);
-      const status = `Tool ${failed ? "failed" : "completed"}: ${toolCall.toolName} (${toolExecutionMs} ms)`;
-      if (failed) writeMessage(chalk.red(status));
-      else writeVerbose(lavender(status));
-      writeToolOutput(output, 500, failed);
-      spinner.start("Thinking");
-    },
+      },
+      onToolExecutionStart: ({ toolCall }) => {
+        spinner.stop();
+        writeVerbose(lavender(`Tool started: ${toolCall.toolName} (${toolCall.toolCallId})`));
+        writeVerbose(chalk.gray(`Input: ${JSON.stringify(toolCall.input).slice(0, 500)}`));
+        spinner.start(`Running ${toolCall.toolName}`);
+      },
+      onToolExecutionEnd: ({ toolCall, toolExecutionMs, toolOutput }) => {
+        spinner.stop();
+        const failed = toolOutput.type === "tool-error";
+        const output = failed ? String(toolOutput.error) : String(toolOutput.output);
+        const status = `Tool ${failed ? "failed" : "completed"}: ${toolCall.toolName} (${toolExecutionMs} ms)`;
+        if (failed) writeMessage(chalk.red(status));
+        else writeVerbose(lavender(status));
+        writeToolOutput(output, 500, failed);
+        spinner.start("Thinking");
+      },
     });
 
     let appendDelta: (delta: string) => void = () => undefined;
@@ -114,6 +118,7 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
         appendDelta = startTextStream("CORBE CODE", true);
       },
       onTextDelta: (delta) => appendDelta(delta),
+      onToolCall: (toolName, input) => writeMessage(chalk.bold(lavender(formatToolActivity(toolName, input)))),
     });
     return {
       text: await result.text,
@@ -141,9 +146,10 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
     const approvalResponses = [];
     for (const request of result.content) {
       if (request.type !== "tool-approval-request" || request.isAutomatic) continue;
-      writeMessage(lavender(`\nAzione proposta: ${request.toolCall.toolName}`));
+      const isShell = request.toolCall.toolName === "shell";
+      if (!isShell) writeMessage(lavender(`\nAzione proposta: ${request.toolCall.toolName}`));
       writeActionPreview(request.toolCall.toolName, request.toolCall.input);
-      const answer = await askTerminal(chalk.cyan("Eseguire? [s]ì / [n]o / [a]ccetta sempre in questo workspace per questa sessione: "));
+      const answer = await askTerminal(chalk.cyan(`${isShell ? "" : "Eseguire? "}[s]ì / [n]o / [a]ccetta sempre in questo workspace per questa sessione: `));
       const decision = getApprovalDecision(answer);
       const approved = decision !== "deny";
       if (decision === "always") {
@@ -249,6 +255,46 @@ const slashCommands: Record<string, SlashCommandHandler> = {
   },
 };
 
+const flowController = new FlowController(flowStore, {
+  runAgent: (run) => runFlowAgent(run, activeSession, (tools) => {
+    sessionStore.approveTools(activeSession.id, tools);
+    activeSession.approvedTools = tools;
+  }, requestController?.signal),
+  confirm: async (question) => {
+    const answer = await ui.select(question, [
+      { value: "no", label: "Annulla" },
+      { value: "yes", label: "Conferma" },
+    ], 0);
+    requestController?.signal.throwIfAborted();
+    return answer === "yes";
+  },
+  select: async (flows, currentId) => {
+    if (flows.length === 0) {
+      writeMessage("Nessuna change salvata.");
+      return undefined;
+    }
+    return ui.select("Seleziona una change", flows.map((flow) => ({
+      value: flow.id,
+      label: `${flow.id.slice(0, 8)} ${flow.title}${flow.id === currentId ? " (corrente)" : ""}`,
+      description: `${flow.closed ? "chiusa" : "aperta"} | ${flow.phase} | revisione ${flow.revision}`,
+    })), Math.max(0, flows.findIndex((flow) => flow.id === currentId)));
+  },
+  write: (text) => writeMessage(text, "markdown"),
+});
+
+for (const command of Object.keys(FLOW_COMMANDS)) {
+  slashCommands[command] = async (args) => {
+    requestController = new AbortController();
+    try {
+      await flowController.execute(command, args);
+    } finally {
+      requestController = undefined;
+      updateFooter();
+    }
+    return false;
+  };
+}
+
 const chat = async (): Promise<void> => {
   while (true) {
     let query: string;
@@ -284,13 +330,22 @@ const chat = async (): Promise<void> => {
 
     const userMessage: ModelMessage = { role: "user", content: query };
     history.push(userMessage);
+    const discussionFlow = flowStore.current();
     try {
       requestController = new AbortController();
       sessionStore.append(activeSession.id, userMessage);
+      if (discussionFlow) {
+        discussionFlow.discussions.push({ role: "user", text: query });
+        flowStore.save(discussionFlow, "User discussion; official plan unchanged.");
+      }
       const reply = await agentLoop(history);
       const assistantMessage: ModelMessage = { role: "assistant", content: reply };
       history.push(assistantMessage);
       sessionStore.append(activeSession.id, assistantMessage);
+      if (discussionFlow) {
+        discussionFlow.discussions.push({ role: "assistant", text: reply });
+        flowStore.save(discussionFlow);
+      }
     } catch (error) {
       writeMessage(chalk.red(error instanceof Error ? error.message : String(error)));
     } finally {
@@ -307,7 +362,7 @@ const ui = startTerminalUi(WORKDIR, Object.keys(slashCommands).map((command) => 
     "/compress": "Compress the conversation", "/quit": "Quit", "/exit": "Quit",
     "/skills": "List available skills",
     "/verbose": "Toggle tool execution details",
-  }[command] ?? "",
+  }[command] ?? FLOW_COMMANDS[command] ?? "",
 })));
 ui.onInterrupt = () => requestController?.abort();
 ui.writeHeader([
@@ -316,9 +371,13 @@ ui.writeHeader([
   "| |  | | | | |_) |  _ \\|  _|   | |  | | | | | | |  _|",
   "| |__| |_| |  _ <| |_) | |___  | |__| |_| | |_| | |___",
   " \\____\\___/|_| \\_\\____/|_____|  \\____\\___/|____/|_____|",
-].join("\n"), "Enter: invia·Alt+Enter: nuova riga·/: comandi·@: file·PgUp/PgDn: cronologia·Ctrl+C: annulla/esci");
-const updateFooter = () => ui.setFooter(`Version ${packageJson.version} | Model: ${MODEL} | Session ${activeSession.id.slice(0, 8)}`);
+].join("\n"), "Enter: invia | Alt+Enter: nuova riga | /: comandi | @: file | PgUp/PgDn: cronologia | Ctrl+C: annulla/esci");
+const updateFooter = () => {
+  const flow = flowStore.current();
+  ui.setFooter(`Version ${packageJson.version} | Model: ${MODEL} | Session ${activeSession.id.slice(0, 8)}${flow ? ` | Flow ${flow.id.slice(0, 8)} ${flow.phase}` : ""}`);
+};
 updateFooter();
+if (recoveredFlow) writeMessage(`Change corrente ripresa: ${recoveredFlow.id.slice(0, 8)} ${recoveredFlow.title} (${recoveredFlow.phase}). Nessuna esecuzione automatica. /flow:resume per i dettagli, /flow:apply per continuare, /flow:pause per la chat libera.`);
 try {
   await chat();
 } finally {

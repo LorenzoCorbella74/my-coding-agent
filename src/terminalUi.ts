@@ -8,7 +8,8 @@ import {
     CombinedAutocompleteProvider, Container, Editor, Loader, Markdown, matchesKey,
     ProcessTerminal, ScrollView, SelectList, Spacer, Text, TuiAltScreen, VStack,
     stripTerminalSequences,
-    type AutocompleteProvider, type MarkdownTheme, type SlashCommand, type Terminal, type SelectItem,
+    truncateToWidth,
+    type AutocompleteProvider, type Component, type MarkdownTheme, type SlashCommand, type Terminal, type SelectItem,
 } from "@earendil-works/pi-tui";
 
 const selectTheme = {
@@ -89,6 +90,7 @@ export class TerminalUi {
     verbose = false;
     private readonly prompt = new Text("YOU >");
     private readonly status = new Container();
+    private readonly selection = new Container();
     private readonly footer = new Text("", 1, 0);
     private readonly autocomplete: AutocompleteProvider;
     private readonly requests: {
@@ -120,6 +122,7 @@ export class TerminalUi {
             { component: new ScrollView(this.transcript, { follow: "end", primary: true }), grow: 1, basis: 0, minSize: 1 },
             this.status,
             { component: this.prompt, visible: () => this.requests.length > 0 && !this.editor.showUserPrefix },
+            { component: this.selection, visible: () => this.cancelSelection !== undefined },
             this.editor,
             this.footer,
         ]));
@@ -159,7 +162,7 @@ export class TerminalUi {
 
     private activatePrompt(): void {
         const request = this.requests[0];
-        if (request) {
+        if (request && !this.cancelSelection) {
             this.editor.showUserPrefix = stripTerminalSequences(request.prompt).trim() === "YOU >";
             this.editor.setPaddingX(this.editor.showUserPrefix ? 7 : 1);
             this.prompt.setText(request.prompt);
@@ -173,24 +176,58 @@ export class TerminalUi {
         if (this.closed) return Promise.reject(new Error("Terminal UI is closed."));
         if (this.cancelSelection) return Promise.reject(new Error("A selection is already open."));
         return new Promise((resolve) => {
-            const list = new SelectList(items, 8, selectTheme);
+            let visibleRows = 6;
+            let list = new SelectList(items, visibleRows, selectTheme);
             list.setSelectedIndex(selectedIndex);
-            const panel = new Container();
-            panel.addChild(new Text(chalk.bold.cyan(title), 1, 0));
-            panel.addChild(list);
-            panel.addChild(new Text(chalk.gray("Frecce: seleziona | Invio: conferma | Esc: annulla"), 1, 0));
-            const overlay = this.tui.showOverlay(panel, { width: "90%", maxHeight: "80%", anchor: "center" });
-            this.tui.setFocus(list);
+            const submitDisabled = this.editor.disableSubmit;
+            this.editor.disableSubmit = true;
+            const heading = new Text(chalk.bold.cyan(title), 1, 0);
+            const headingView: Component = {
+                render: (width) => {
+                    const lines = heading.render(width);
+                    return lines.length > 2 ? [lines[0]!, truncateToWidth(lines[1]!, Math.max(0, width - 3), "") + "..."] : lines;
+                },
+                invalidate: () => heading.invalidate(),
+            };
+            const selectionView: Component = {
+                capturesViewportInput: false,
+                render: (width) => {
+                    const rows = Math.min(6, Math.max(1, this.tui.terminal.rows - this.editor.render(width).length
+                        - this.footer.render(width).length - this.status.render(width).length - headingView.render(width).length - 2));
+                    if (rows !== visibleRows) {
+                        const previous = list;
+                        list = new SelectList(items, rows, selectTheme);
+                        list.setSelectedIndex(items.findIndex((item) => item.value === previous.getSelectedItem()?.value));
+                        if (previous.onSelect) list.onSelect = previous.onSelect;
+                        if (previous.onCancel) list.onCancel = previous.onCancel;
+                        visibleRows = rows;
+                    }
+                    return list.render(width);
+                },
+                invalidate: () => list.invalidate(),
+                handleInput: (data) => list.handleInput(data),
+                handleMouse: (event) => list.handleMouse(event),
+            };
+            this.selection.addChild(headingView);
+            this.selection.addChild(selectionView);
             const finish = (value?: string) => {
-                overlay.hide();
+                this.selection.clear();
                 this.cancelSelection = undefined;
+                this.editor.disableSubmit = submitDisabled;
                 this.tui.setFocus(this.editor);
+                if (value !== undefined) {
+                    const item = items.find((entry) => entry.value === value);
+                    this.write(`${title}: ${item?.label ?? value}`);
+                }
+                this.activatePrompt();
                 this.tui.requestRender();
                 resolve(value);
             };
             this.cancelSelection = () => finish();
             list.onSelect = (item) => finish(item.value);
             list.onCancel = () => finish();
+            this.tui.setFocus(selectionView);
+            this.tui.requestRender();
         });
     }
 
@@ -236,13 +273,17 @@ export class TerminalUi {
         this.tui.requestRender();
     }
 
-    writeToolOutput(output: string, limit: number, failed = false): void {
-        this.write(chalk.gray(chalk.bold("Output:")));
+    writeToolOutput(output: string, limit: number, failed = false, source?: string): void {
+        this.write(chalk.gray(chalk.bold(source ? `${source} output:` : "Output:")));
         this.write(failed ? chalk.red(output.slice(0, limit)) : output.slice(0, limit), failed ? "log" : "markdown");
-        if (output.length > limit) this.write(chalk.gray("... (output troncato)"));
+        if (output.length > limit) this.write(chalk.gray(`${source ? `${source}: ` : ""}... (output troncato)`));
     }
 
     writeActionPreview(toolName: string, input: unknown): void {
+        if (toolName === "shell" && typeof input === "object" && input !== null && "command" in input && typeof input.command === "string") {
+            this.write(chalk.cyan(`Eseguire "${input.command}" ?`));
+            return;
+        }
         const preview = getActionPreview(toolName, input);
         if (preview) {
             this.write(chalk.bold.cyan(preview.filePath));
@@ -303,5 +344,5 @@ export const getTerminalUi = (): TerminalUi => {
 export const writeMessage = (text = "", kind: "log" | "user" | "assistant" | "markdown" = "log"): void => getTerminalUi().write(text, kind);
 export const writeVerbose = (text: string): void => getTerminalUi().writeVerbose(text);
 export const startTextStream = (label: string, highlighted = false): ((delta: string) => void) => getTerminalUi().startTextStream(label, highlighted);
-export const writeToolOutput = (output: string, limit: number, failed = false): void => getTerminalUi().writeToolOutput(output, limit, failed);
+export const writeToolOutput = (output: string, limit: number, failed = false, source?: string): void => getTerminalUi().writeToolOutput(output, limit, failed, source);
 export const writeActionPreview = (toolName: string, input: unknown): void => getTerminalUi().writeActionPreview(toolName, input);

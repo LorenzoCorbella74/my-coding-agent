@@ -15,7 +15,7 @@ import { SkillLoader } from "./skills";
 import { runSubagent } from "./tools/subagents";
 import type { Session } from "./sessionStore";
 import type { createSpinner } from "./spinner";
-import { AgentLoader } from "./agents";
+import { AgentLoader, selectDiscussionTools } from "./agents";
 
 export const MAX_READ_CHARS = 50000;
 export const MAX_BATCH_READ_FILES = 20;
@@ -135,7 +135,7 @@ export const TOOLS = {
     })
 };
 
-const AGENTS = new AgentLoader(WORKDIR, TOOLS);
+export const AGENTS = new AgentLoader(WORKDIR, TOOLS);
 export const AGENTS_DESCRIPTIONS = AGENTS.getDescriptions();
 const GENERAL_PURPOSE_AGENT = "general-purpose";
 const resolveAgent = (name: string | undefined) => {
@@ -150,7 +150,8 @@ export const createParentTools = (
     spinner: ReturnType<typeof createSpinner>,
     approveTools: (tools: string[]) => void,
     abortSignal?: AbortSignal,
-) => ({
+    discussionOnly = false,
+) => discussionOnly ? selectDiscussionTools(TOOLS) : ({
     ...TOOLS,
     task: tool({
         description:
