@@ -1,7 +1,8 @@
 import chalk from "chalk";
 import { lavender, orange } from "./palette";
 import { withSpinner } from "./spinner";
-import { generateText, isLoopFinished } from "ai";
+import { streamText, isLoopFinished } from "ai";
+import { consumeTextStream } from "./agentStream";
 import { microCompact, estimateTokens, autoCompact } from "./compact";
 import type { ModelMessage } from "ai";
 import packageJson from "../package.json" with { type: "json" };
@@ -11,7 +12,7 @@ import { WORKDIR, api, MODEL, CONTEXT_LIMIT } from "./config";
 import { SessionStore } from "./sessionStore";
 import { SKILLS_DESCRIPTIONS, AGENTS_DESCRIPTIONS, getSkillsTable } from "./tools";
 import { readWorkspaceInstructions } from "./workspaceInstructions";
-import { startTerminalUi, writeMessage, writeVerbose, writeToolOutput, writeActionPreview } from "./terminalUi";
+import { startTerminalUi, startTextStream, writeMessage, writeVerbose, writeToolOutput, writeActionPreview } from "./terminalUi";
 import { formatToolActivity } from "./toolActivity";
 
 const formatTokenCount = (count: number): string => String(count).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
@@ -61,7 +62,8 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
   }
 
   const workingMessages = [...messages];
-  const generate = (inputMessages: ModelMessage[]) => withSpinner("Thinking", async (spinner) => generateText({
+  const generate = (inputMessages: ModelMessage[]) => withSpinner("Thinking", async (spinner) => {
+    const result = streamText({
     model: api(MODEL),
     system: SYSTEM_PROMPT,
     messages: inputMessages,
@@ -103,7 +105,23 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
       writeToolOutput(output, 500, failed);
       spinner.start("Thinking");
     },
-  }));
+    });
+
+    let appendDelta: (delta: string) => void = () => undefined;
+    await consumeTextStream(result.fullStream, {
+      onTextStart: () => {
+        spinner.stop();
+        appendDelta = startTextStream(chalk.bold.cyan("CORBE CODE"));
+      },
+      onTextDelta: (delta) => appendDelta(delta),
+    });
+    return {
+      text: await result.text,
+      content: await result.content,
+      usage: await result.usage,
+      responseMessages: await result.responseMessages,
+    };
+  });
 
   let result = await generate(workingMessages);
   let inputTokens = 0;
@@ -273,7 +291,6 @@ const chat = async (): Promise<void> => {
       const assistantMessage: ModelMessage = { role: "assistant", content: reply };
       history.push(assistantMessage);
       sessionStore.append(activeSession.id, assistantMessage);
-      if (reply) writeMessage(reply, "assistant");
     } catch (error) {
       writeMessage(chalk.red(error instanceof Error ? error.message : String(error)));
     } finally {

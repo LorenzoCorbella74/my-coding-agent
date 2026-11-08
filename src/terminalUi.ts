@@ -209,6 +209,18 @@ export class TerminalUi {
         this.tui.requestRender();
     }
 
+    startTextStream(label: string): (delta: string) => void {
+        this.transcript.addChild(new Text(label, 1, 0));
+        const block = renderMarkdown("");
+        this.transcript.addChild(block);
+        let text = "";
+        return (delta) => {
+            text += delta;
+            block.setText(text);
+            this.tui.requestRender();
+        };
+    }
+
     writeVerbose(text: string): void {
         if (this.verbose) this.write(text);
     }
@@ -288,5 +300,6 @@ export const getTerminalUi = (): TerminalUi => {
 };
 export const writeMessage = (text = "", kind: "log" | "user" | "assistant" | "markdown" = "log"): void => getTerminalUi().write(text, kind);
 export const writeVerbose = (text: string): void => getTerminalUi().writeVerbose(text);
+export const startTextStream = (label: string): ((delta: string) => void) => getTerminalUi().startTextStream(label);
 export const writeToolOutput = (output: string, limit: number, failed = false): void => getTerminalUi().writeToolOutput(output, limit, failed);
 export const writeActionPreview = (toolName: string, input: unknown): void => getTerminalUi().writeActionPreview(toolName, input);
