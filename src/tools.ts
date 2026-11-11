@@ -16,6 +16,7 @@ import { runSubagent } from "./tools/subagents";
 import type { Session } from "./sessionStore";
 import type { createSpinner } from "./spinner";
 import { AgentLoader, selectDiscussionTools } from "./agents";
+import { webSearch, webExtract } from "./tools/web";
 
 export const MAX_READ_CHARS = 50000;
 export const MAX_BATCH_READ_FILES = 20;
@@ -132,7 +133,10 @@ export const TOOLS = {
         description: "Load specialized knowledge by name",
         inputSchema: zodSchema(z.object({ name: z.string() })),
         execute: async ({ name }) => SKILLS.getContent(name),
-    })
+    }),
+    webSearch,
+    webExtract,
+
 };
 
 export const AGENTS = new AgentLoader(WORKDIR, TOOLS);
