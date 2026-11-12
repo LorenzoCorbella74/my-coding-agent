@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import type { FlowRole } from "./agents";
+import type { FlowRole } from "../features/agents";
 
 export const taskStatusSchema = z.enum(["pending", "in_progress", "completed", "blocked"]);
 const taskSchema = z.object({ id: z.string().min(1), title: z.string().min(1), status: taskStatusSchema, detail: z.string() }).strict();

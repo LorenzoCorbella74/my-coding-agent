@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { BUILTIN_PROVIDERS, ModelSettings, type ModelInfo, type ProviderConfig } from "./models";
+import { BUILTIN_PROVIDERS, ModelSettings, type ModelInfo, type ProviderConfig } from "./providers-models";
 import { knownModelInfo } from "./modelCatalog";
-import type { TerminalUi } from "./terminalUi";
+import type { TerminalUi } from "../UI/terminalUi";
 
 export function createModelCommands(ui: TerminalUi, settings: ModelSettings, updateFooter: () => void) {
     const showOverrides = () => {

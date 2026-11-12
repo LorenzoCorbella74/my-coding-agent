@@ -5,7 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { FlowController, flowChatContext, validateVerificationEvidence, type FlowAgentRun } from "./flow";
 import { FlowStore, type FlowPlan, type FlowReport } from "./flowStore";
-import { executeCommandWithResult } from "./tools/commands";
+import { executeCommandWithResult } from "../tools/commands";
 
 const plan: FlowPlan = { analysis: "Analysis", scope: "Auth", exclusions: "SSO", risks: "Sessions", criteria: [{ id: "AC1", text: "Login" }], tasks: [{ id: "T1", title: "Implement", status: "pending", detail: "" }] };
 const report: FlowReport = { outcome: "completed", summary: "Done", changedFiles: ["src/auth.ts"], checks: [{ command: "npm test", outcome: "pass", detail: "Passed" }], criteria: [{ id: "AC1", outcome: "pass", evidence: "Test" }], findings: [] };

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ModelInfo, ProviderConfig } from "./models";
+import type { ModelInfo, ProviderConfig } from "./providers-models";
 
 const support = z.object({ supported: z.boolean() });
 const catalogEntry = z.object({

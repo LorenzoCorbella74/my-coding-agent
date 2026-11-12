@@ -1,18 +1,18 @@
 import { streamText, isLoopFinished, isStepCount, type ModelMessage, type ToolSet } from "ai";
 import { consumeTextStream } from "../agentStream";
 import { WORKDIR } from "../config";
-import { modelSettings } from "../models";
-import { TOOLS } from "../tools";
+import { modelSettings } from "../slash/providers-models";
+import { TOOLS } from "./tools-definitions";
 import chalk from "chalk";
-import { lavender } from "../palette";
-import type { Session } from "../sessionStore";
-import type { createSpinner } from "../spinner";
-import { askTerminal, getApprovalDecision } from "../terminalInput";
-import { selectAgentTools, type CustomAgent } from "../agents";
-import { readWorkspaceInstructions } from "../workspaceInstructions";
-import { writeMessage, writeVerbose, writeToolOutput, writeActionPreview, startTextStream } from "../terminalUi";
-import { formatToolActivity } from "../toolActivity";
-import { memoryStore } from "../memory";
+import { lavender } from "../UI/palette";
+import type { Session } from "../features/sessionStore";
+import type { createSpinner } from "../UI/spinner";
+import { askTerminal, getApprovalDecision } from "../UI/terminalInput";
+import { selectAgentTools, type CustomAgent } from "../features/agents";
+import { readWorkspaceInstructions } from "../features/workspaceInstructions";
+import { writeMessage, writeVerbose, writeToolOutput, writeActionPreview, startTextStream } from "../UI/terminalUi";
+import { formatToolActivity } from "../UI/toolActivity";
+import { memoryStore } from "../features/memory";
 
 const MUTATING_TOOLS = ["shell", "edit_file", "write_file"];
 

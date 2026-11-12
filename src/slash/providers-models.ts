@@ -7,9 +7,9 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { generateText, LanguageModel } from "ai";
-import { CONTEXT_LIMIT, GLOBAL_DATA_DIR } from "./config";
+import { CONTEXT_LIMIT, GLOBAL_DATA_DIR } from "../config";
 import { discoverModels, knownModelInfo, inspectOllamaModel, validateProvider } from "./modelCatalog";
-import { writePrivateFile } from "./paths";
+import { writePrivateFile } from "../utils/paths";
 
 const providerSchema = z.object({
     type: z.enum(["openrouter", "openai", "anthropic", "google", "openai-compatible", "ollama"]),

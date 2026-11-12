@@ -1,7 +1,7 @@
 import path from "path";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { WORKDIR } from "./config";
+import { WORKDIR } from "../config";
 
 export const safePath = (p: string) => {
     const resolved = path.resolve(WORKDIR, p);

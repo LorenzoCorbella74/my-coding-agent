@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { WORKDIR } from "./config";
-import { parseFrontmatter } from "./frontmatter";
+import { WORKDIR } from "../config";
+import { parseFrontmatter } from "../utils/frontmatter";
 
 let _SKILLS_DIR = path.join(WORKDIR, ".corbecode/skills");
 export const getSKILLS_DIR = () => _SKILLS_DIR;

@@ -97,7 +97,9 @@ Il tool `memory` gestisce preferenze e note durevoli come chiave-valore in Markd
 
 Puoi chiedere, ad esempio, "Ricorda globalmente che preferisco risposte in italiano", "Per questo progetto ricorda di usare npm", "Mostra la memoria globale" oppure "Dimentica la preferenza di progetto tooling.package-manager". Non servono nuovi slash command: l'agente usa le operazioni `set`, `list` e `delete`.
 
-L'agente principale puo' salvare autonomamente preferenze esplicite e durevoli quando lo scope e' chiaro; deve chiedere se e' ambiguo. Non deve dedurre preferenze da comportamenti, file o risultati dei tool, ne' salvare credenziali, segreti, dati personali/sensibili o stato temporaneo dei task. Le cancellazioni richiedono una richiesta dell'utente. Queste regole guidano l'agente: non sono un classificatore automatico dei contenuti.
+L'agente principale deve valutare proattivamente le preferenze esplicite e durevoli in ogni messaggio, senza aspettare parole come "ricorda" o "salva". Sono ammesse preferenze non sensibili anche generiche, non solo scelte di lavoro. Quando lo scope e' chiaro deve usare `set` prima di confermare il salvataggio; quando e' ambiguo deve chiedere globale o progetto, anche se non e' stata richiesta esplicitamente la memorizzazione. Una preferenza gia' presente nello stesso scope non va riscritta inutilmente e una richiesta di non memorizzare va rispettata.
+
+Non deve dedurre preferenze da comportamenti, esempi citati, file o risultati dei tool, ne' salvare credenziali, segreti, dati personali identificativi o sensibili (per esempio salute o contatti), conversazioni o stato temporaneo dei task. Le cancellazioni richiedono una richiesta dell'utente. Il controllo e' nelle istruzioni del modello e nella descrizione del tool: non vengono aggiunte chiamate LLM separate ne' salvataggi basati su regex. La scelta rimane del modello, quindi non e' una garanzia deterministica di riconoscimento o un classificatore automatico dei contenuti.
 
 Il formato e' modificabile a mano, con una voce per riga:
 
@@ -132,6 +134,8 @@ I salvataggi sono atomici e usano gli stessi permessi privati della configurazio
 - Agent Skills: elenca le skill disponibili per l'agente, incluse quelle definite nel workspace e i tool integrati.
 
 ## Comandi
+
+Implementazione, dispatch e metadati dei comandi sono raccolti in [src/slash/](./src/slash/): il punto d'ingresso della chat richiama il modulo senza definire i singoli handler. La stessa gestione collega gli shortcut dei modelli, le sessioni e i workflow.
 
 **CLI**
 

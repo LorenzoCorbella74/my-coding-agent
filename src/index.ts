@@ -1,25 +1,24 @@
 import chalk from "chalk";
-import { lavender, orange } from "./palette";
-import { withSpinner } from "./spinner";
+import { lavender, orange } from "./UI/palette";
+import { withSpinner } from "./UI/spinner";
 import { streamText, isLoopFinished } from "ai";
 import { consumeTextStream } from "./agentStream";
-import { microCompact, estimateTokens, autoCompact } from "./compact";
+import { microCompact, estimateTokens, autoCompact } from "./features/compact";
 import type { ModelMessage } from "ai";
 import packageJson from "../package.json" with { type: "json" };
-import { createParentTools } from "./tools";
-import { askTerminal, closeTerminalInput, getApprovalDecision } from "./terminalInput";
+import { createParentTools } from "./tools/tools-definitions";
+import { askTerminal, closeTerminalInput, getApprovalDecision } from "./UI/terminalInput";
 import { GLOBAL_DATA_DIR, WORKDIR } from "./config";
-import { modelSettings } from "./models";
-import { createModelCommands } from "./modelCommands";
-import { SessionStore } from "./sessionStore";
-import { SKILLS_DESCRIPTIONS, AGENTS_DESCRIPTIONS, getSkillsTable } from "./tools";
-import { readWorkspaceInstructions } from "./workspaceInstructions";
-import { startTerminalUi, startTextStream, writeMessage, writeVerbose, writeToolOutput, writeActionPreview } from "./terminalUi";
-import { FlowStore } from "./flowStore";
-import { FLOW_COMMANDS, FlowController, flowChatContext } from "./flow";
-import { runFlowAgent } from "./flowRuntime";
-import { formatToolActivity } from "./toolActivity";
-import { memoryStore } from "./memory";
+import { modelSettings } from "./slash/providers-models";
+import { createSlashCommands, SLASH_COMMANDS, type ChatState } from "./slash";
+import { SessionStore } from "./features/sessionStore";
+import { SKILLS_DESCRIPTIONS, AGENTS_DESCRIPTIONS } from "./tools/tools-definitions";
+import { readWorkspaceInstructions } from "./features/workspaceInstructions";
+import { startTerminalUi, startTextStream, writeMessage, writeVerbose, writeToolOutput, writeActionPreview } from "./UI/terminalUi";
+import { FlowStore } from "./slash/flowStore";
+import { flowChatContext } from "./slash/flow";
+import { formatToolActivity } from "./UI/toolActivity";
+import { memoryStore } from "./features/memory";
 
 const formatTokenCount = (count: number): string => String(count).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 
@@ -49,11 +48,12 @@ ${workspaceInstructions ? `Workspace instructions from AGENTS.md:\n${workspaceIn
 const sessionStore = new SessionStore(WORKDIR, GLOBAL_DATA_DIR);
 const flowStore = new FlowStore(WORKDIR);
 const recoveredFlow = flowStore.recover();
-let activeSession = sessionStore.resumeOrCreate();
-let history = activeSession.messages;
+const state: ChatState = {
+  session: sessionStore.resumeOrCreate(),
+  requestController: undefined,
+  lastTurnUsage: "",
+};
 const MUTATING_TOOLS = ["shell", "edit_file", "write_file"];
-let requestController: AbortController | undefined;
-let lastTurnUsage = "";
 
 /** AGENT LOOP */
 const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
@@ -64,8 +64,8 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
   writeMessage(orange(`${chalk.bold("Tokens usati finora:")} ${estTokens}`));
   if (estTokens > modelSettings.contextLimit()) {
     writeMessage(`compacting at ${estTokens}`);
-    const compacted = await withSpinner("Compressing context", () => autoCompact(messages, requestController?.signal));
-    if (messages === history) sessionStore.replace(activeSession.id, compacted);
+    const compacted = await withSpinner("Compressing context", () => autoCompact(messages, state.requestController?.signal));
+    if (messages === state.session.messages) sessionStore.replace(state.session.id, compacted);
     messages.length = 0;
     messages.push(...compacted);
     writeMessage(`new tokens, ${estimateTokens(messages)}`);
@@ -77,14 +77,14 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
       ...modelRequest,
       system: `${SYSTEM_PROMPT}\n\n${memoryStore.context()}\n\n${flowChatContext(flowStore.current())}`,
       messages: inputMessages,
-      ...(requestController && { abortSignal: requestController.signal }),
-      tools: createParentTools(activeSession, spinner, (tools) => {
-        sessionStore.approveTools(activeSession.id, tools);
-      }, requestController?.signal, Boolean(flowStore.current())),
+      ...(state.requestController && { abortSignal: state.requestController.signal }),
+      tools: createParentTools(state.session, spinner, (tools) => {
+        sessionStore.approveTools(state.session.id, tools);
+      }, state.requestController?.signal, Boolean(flowStore.current())),
       toolApproval: {
-        shell: () => activeSession.approvedTools.includes("shell") ? "approved" : "user-approval",
-        edit_file: () => activeSession.approvedTools.includes("edit_file") ? "approved" : "user-approval",
-        write_file: () => activeSession.approvedTools.includes("write_file") ? "approved" : "user-approval",
+        shell: () => state.session.approvedTools.includes("shell") ? "approved" : "user-approval",
+        edit_file: () => state.session.approvedTools.includes("edit_file") ? "approved" : "user-approval",
+        write_file: () => state.session.approvedTools.includes("write_file") ? "approved" : "user-approval",
       },
       stopWhen: isLoopFinished(),
       onToolExecutionStart: ({ toolCall }) => {
@@ -154,8 +154,8 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
       const decision = getApprovalDecision(answer);
       const approved = decision !== "deny";
       if (decision === "always") {
-        sessionStore.approveTools(activeSession.id, MUTATING_TOOLS);
-        activeSession.approvedTools = MUTATING_TOOLS;
+        sessionStore.approveTools(state.session.id, MUTATING_TOOLS);
+        state.session.approvedTools = MUTATING_TOOLS;
       }
       if (!approved) writeMessage(lavender("Azione rifiutata."));
       approvalResponses.push({
@@ -169,153 +169,10 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
     result = await generate(workingMessages);
   }
 
-  lastTurnUsage = `Input: ${formatTokenCount(inputTokens)} | Output: ${formatTokenCount(outputTokens)} | Total: ${formatTokenCount(totalTokens)}`;
+  state.lastTurnUsage = `Input: ${formatTokenCount(inputTokens)} | Output: ${formatTokenCount(outputTokens)} | Total: ${formatTokenCount(totalTokens)}`;
   updateFooter();
   return result.text;
 };
-
-/** INTERFACE */
-type SlashCommandHandler = (args: string) => Promise<boolean>;
-
-const exitChat: SlashCommandHandler = async () => {
-  writeMessage(chalk.gray("Exiting chat..."));
-  closeTerminalInput();
-  return true;
-};
-
-const configureModel = async (run: (signal: AbortSignal) => Promise<void>): Promise<boolean> => {
-  requestController = new AbortController();
-  try {
-    await run(requestController.signal);
-  } finally {
-    requestController = undefined;
-  }
-  return false;
-};
-
-const slashCommands: Record<string, SlashCommandHandler> = {
-  "/login": async () => configureModel((signal) => modelCommands.login(signal)),
-  "/models": async (args) => {
-    if (args === "next") return configureModel(() => modelCommands.next());
-    if (args === "favorites") return configureModel(() => modelCommands.favorites());
-    if (args && args !== "refresh") throw new Error("Usage: /models [refresh|next|favorites]");
-    return configureModel((signal) => modelCommands.models(args === "refresh", signal));
-  },
-  "/verbose": async () => {
-    ui.verbose = !ui.verbose;
-    writeMessage(chalk.cyan(`Verbose: ${ui.verbose ? "ON" : "OFF"}`));
-    return false;
-  },
-  "/quit": exitChat,
-  "/exit": exitChat,
-  "/new": async () => {
-    activeSession = sessionStore.create();
-    history = activeSession.messages;
-    lastTurnUsage = "";
-    updateFooter();
-    writeMessage(chalk.cyan(`Started session ${activeSession.id.slice(0, 8)}.`));
-    return false;
-  },
-  "/sessions": async () => {
-    const sessions = sessionStore.list();
-    if (sessions.length === 0) {
-      writeMessage(lavender("No sessions found."));
-      return false;
-    }
-    const selected = await ui.select("Seleziona una sessione", sessions.map((session) => ({
-      value: session.id,
-      label: `${session.id.slice(0, 8)} ${session.title || session.preview}${session.id === activeSession.id ? " (corrente)" : ""}`,
-      description: `${new Date(session.updatedAt).toLocaleString()} | ${session.messageCount} messaggi`,
-    })), sessions.findIndex((session) => session.id === activeSession.id));
-    if (selected) {
-      activeSession = sessionStore.restore(selected);
-      history = activeSession.messages;
-      lastTurnUsage = "";
-      updateFooter();
-      writeMessage(chalk.cyan(`Restored session ${activeSession.id.slice(0, 8)}.`));
-    }
-    return false;
-  },
-  "/skills": async () => {
-    writeMessage(getSkillsTable(), "markdown");
-    return false;
-  },
-  "/restore": async (idPrefix) => {
-    if (!idPrefix) {
-      writeMessage(lavender("Usage: /restore <sessionId>"));
-      return false;
-    }
-    try {
-      activeSession = sessionStore.restore(idPrefix);
-      history = activeSession.messages;
-      lastTurnUsage = "";
-      updateFooter();
-      writeMessage(chalk.cyan(`Restored session ${activeSession.id.slice(0, 8)}.`));
-    } catch (error) {
-      writeMessage(chalk.red(error instanceof Error ? error.message : String(error)));
-    }
-    return false;
-  },
-  "/compress": async () => {
-    if (history.length === 0) {
-      writeMessage(lavender("Nothing to compress."));
-      return false;
-    }
-
-    try {
-      requestController = new AbortController();
-      const compacted = await withSpinner("Compressing context", () => autoCompact(history, requestController?.signal));
-      sessionStore.replace(activeSession.id, compacted);
-      history.splice(0, history.length, ...compacted);
-      writeMessage(chalk.cyan("Conversation compressed."));
-    } catch (error) {
-      writeMessage(chalk.red(error instanceof Error ? error.message : String(error)));
-    } finally {
-      requestController = undefined;
-    }
-    return false;
-  },
-};
-
-const flowController = new FlowController(flowStore, {
-  runAgent: (run) => runFlowAgent(run, activeSession, (tools) => {
-    sessionStore.approveTools(activeSession.id, tools);
-    activeSession.approvedTools = tools;
-  }, requestController?.signal),
-  confirm: async (question) => {
-    const answer = await ui.select(question, [
-      { value: "no", label: "Annulla" },
-      { value: "yes", label: "Conferma" },
-    ], 0);
-    requestController?.signal.throwIfAborted();
-    return answer === "yes";
-  },
-  select: async (flows, currentId) => {
-    if (flows.length === 0) {
-      writeMessage("Nessuna change salvata.");
-      return undefined;
-    }
-    return ui.select("Seleziona una change", flows.map((flow) => ({
-      value: flow.id,
-      label: `${flow.id.slice(0, 8)} ${flow.title}${flow.id === currentId ? " (corrente)" : ""}`,
-      description: `${flow.closed ? "chiusa" : "aperta"} | ${flow.phase} | revisione ${flow.revision}`,
-    })), Math.max(0, flows.findIndex((flow) => flow.id === currentId)));
-  },
-  write: (text) => writeMessage(text, "markdown"),
-});
-
-for (const command of Object.keys(FLOW_COMMANDS)) {
-  slashCommands[command] = async (args) => {
-    requestController = new AbortController();
-    try {
-      await flowController.execute(command, args);
-    } finally {
-      requestController = undefined;
-      updateFooter();
-    }
-    return false;
-  };
-}
 
 const chat = async (): Promise<void> => {
   while (true) {
@@ -329,41 +186,26 @@ const chat = async (): Promise<void> => {
       return;
     }
 
-    if (["exit", "quit"].includes(query.trim().toLowerCase())) {
-      await exitChat("");
-      return;
-    }
-
-    if (query.trim().startsWith("/")) {
-      const [command = "", ...args] = query.trim().split(/\s+/);
-      const handler = slashCommands[command.toLowerCase()];
-      try {
-        if (!handler) {
-          writeMessage(lavender(`Unknown command: ${command}`));
-        } else if (await handler(args.join(" "))) {
-          return;
-        }
-      } catch (error) {
-        writeMessage(chalk.red(error instanceof Error ? error.message : String(error)));
-      }
-      writeMessage();
+    const handled = await slashCommands.execute(query);
+    if (handled !== undefined) {
+      if (handled) return;
       continue;
     }
 
     const userMessage: ModelMessage = { role: "user", content: query };
-    history.push(userMessage);
+    state.session.messages.push(userMessage);
     const discussionFlow = flowStore.current();
     try {
-      requestController = new AbortController();
-      sessionStore.append(activeSession.id, userMessage);
+      state.requestController = new AbortController();
+      sessionStore.append(state.session.id, userMessage);
       if (discussionFlow) {
         discussionFlow.discussions.push({ role: "user", text: query });
         flowStore.save(discussionFlow, "User discussion; official plan unchanged.");
       }
-      const reply = await agentLoop(history);
+      const reply = await agentLoop(state.session.messages);
       const assistantMessage: ModelMessage = { role: "assistant", content: reply };
-      history.push(assistantMessage);
-      sessionStore.append(activeSession.id, assistantMessage);
+      state.session.messages.push(assistantMessage);
+      sessionStore.append(state.session.id, assistantMessage);
       if (discussionFlow) {
         discussionFlow.discussions.push({ role: "assistant", text: reply });
         flowStore.save(discussionFlow);
@@ -371,7 +213,7 @@ const chat = async (): Promise<void> => {
     } catch (error) {
       writeMessage(chalk.red(error instanceof Error ? error.message : String(error)));
     } finally {
-      requestController = undefined;
+      state.requestController = undefined;
     }
     writeMessage();
   }
@@ -379,17 +221,8 @@ const chat = async (): Promise<void> => {
 
 const startupModel = modelSettings.current();
 if (startupModel) modelSettings.provider(startupModel.provider);
-const ui = startTerminalUi(WORKDIR, Object.keys(slashCommands).map((command) => ({
-  name: command.slice(1),
-  description: {
-    "/new": "Start a new session", "/sessions": "List sessions", "/restore": "Restore a session",
-    "/compress": "Compress the conversation", "/quit": "Quit", "/exit": "Quit",
-    "/skills": "List available skills",
-    "/verbose": "Toggle tool execution details",
-    "/login": "Configure provider credentials", "/models": "Select model; refresh catalogs; next/favorites for quick cycling",
-  }[command] ?? FLOW_COMMANDS[command] ?? "",
-})));
-ui.onInterrupt = () => requestController?.abort();
+const ui = startTerminalUi(WORKDIR, SLASH_COMMANDS);
+ui.onInterrupt = () => state.requestController?.abort();
 ui.writeHeader([
   "  ____ ___  ____  ____  _____    ____ ___  ____  _____",
   " / ___/ _ \\|  _ \\| __ )| ____|  / ___/ _ \\|  _ \\| ____|",
@@ -401,15 +234,9 @@ const updateFooter = () => {
   const flow = flowStore.current();
   const current = modelSettings.current();
   const model = current ? `${modelSettings.provider(current.provider).name} / ${current.model} | Reasoning: ${current.control ? current.reasoning : "N/A"}` : "nessuno (/login, /models)";
-  ui.setFooter(`Version ${packageJson.version} | Model: ${model} | Session ${activeSession.id.slice(0, 8)}${flow ? ` | Flow ${flow.id.slice(0, 8)} ${flow.phase}` : ""}`, lastTurnUsage);
+  ui.setFooter(`Version ${packageJson.version} | Model: ${model} | Session ${state.session.id.slice(0, 8)}${flow ? ` | Flow ${flow.id.slice(0, 8)} ${flow.phase}` : ""}`, state.lastTurnUsage);
 };
-const modelCommands = createModelCommands(ui, modelSettings, updateFooter);
-ui.onReasoning = () => {
-  void modelCommands.reasoning().catch((error: unknown) => writeMessage(chalk.red(error instanceof Error ? error.message : String(error))));
-};
-ui.onNextModel = () => {
-  void modelCommands.next().catch((error: unknown) => writeMessage(chalk.red(error instanceof Error ? error.message : String(error))));
-};
+const slashCommands = createSlashCommands({ ui, settings: modelSettings, sessionStore, flowStore, state, updateFooter });
 updateFooter();
 if (!startupModel) writeMessage("Configura un provider con /login, poi scegli il modello con /models.");
 const modelOverrides = modelSettings.environmentOverrides();

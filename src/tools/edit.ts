@@ -1,5 +1,5 @@
 import fs from "fs";
-import { safePath } from "../tools";
+import { safePath } from "./tools-definitions";
 
 export const runEdit = (filePath: string, oldText: string, newText: string) => {
     try {

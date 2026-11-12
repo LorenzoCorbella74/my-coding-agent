@@ -5,9 +5,9 @@ import path from "node:path";
 import { test } from "node:test";
 import { generateText, isStepCount, streamText, tool } from "ai";
 import { z } from "zod";
-import { ModelSettings, type ModelInfo, type ProviderConfig } from "./models";
+import { ModelSettings, type ModelInfo, type ProviderConfig } from "./providers-models";
 import { discoverModels, inspectOllamaModel, knownModelInfo } from "./modelCatalog";
-import { consumeTextStream } from "./agentStream";
+import { consumeTextStream } from "../agentStream";
 
 test("persists multiple providers and reasoning atomically, respects overrides, and rejects corrupt settings", () => {
     const root = mkdtempSync(path.join(tmpdir(), "corbecode-models-"));
@@ -141,8 +141,10 @@ test("discovers authenticated paginated catalogs and rejects unsafe pages and ma
         } : {
             data: [{
                 id: "first", display_name: "First", max_input_tokens: 200000,
-                capabilities: { thinking: { supported: true, types: { adaptive: { supported: true } } },
-                    effort: { supported: true, low: { supported: true }, high: { supported: true }, max: { supported: false } } },
+                capabilities: {
+                    thinking: { supported: true, types: { adaptive: { supported: true } } },
+                    effort: { supported: true, low: { supported: true }, high: { supported: true }, max: { supported: false } }
+                },
             }], has_more: true, last_id: "first",
         });
     };
@@ -167,10 +169,12 @@ test("discovers authenticated paginated catalogs and rejects unsafe pages and ma
     await assert.rejects(discoverModels(provider, async () => new Response("do-not-log-this", { status: 401 })), /authentication.*401/);
     const google = await discoverModels({ type: "google", name: "Gemini", apiKey: "test" }, async (_input, init) => {
         assert.equal(new Headers(init?.headers).get("x-goog-api-key"), "test");
-        return Response.json({ models: [
-            { name: "models/gemini-2.5-pro", inputTokenLimit: 1048576, supportedGenerationMethods: ["generateContent"] },
-            { name: "models/embedding", supportedGenerationMethods: ["embedContent"] },
-        ] });
+        return Response.json({
+            models: [
+                { name: "models/gemini-2.5-pro", inputTokenLimit: 1048576, supportedGenerationMethods: ["generateContent"] },
+                { name: "models/embedding", supportedGenerationMethods: ["embedContent"] },
+            ]
+        });
     });
     assert.equal(google.length, 1);
     assert.equal(google[0]?.id, "gemini-2.5-pro");

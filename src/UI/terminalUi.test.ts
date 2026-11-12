@@ -7,14 +7,14 @@ import path from "node:path";
 import { test } from "node:test";
 import { ProcessTerminal, stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import { createAutocomplete, renderMarkdown, TerminalUi } from "./terminalUi";
-import { getSKILLS_DIR, setSKILLS_DIR, SkillLoader } from "./skills";
+import { getSKILLS_DIR, setSKILLS_DIR, SkillLoader } from "../features/skills";
 import { getActionPreview } from "./actionPreview";
-import { consumeTextStream } from "./agentStream";
+import { consumeTextStream } from "../agentStream";
 import { formatToolActivity } from "./toolActivity";
 import type { TextStreamPart, ToolSet } from "ai";
-import { executeCommandWithResult } from "./tools/commands";
-import { ModelSettings } from "./models";
-import { createModelCommands } from "./modelCommands";
+import { executeCommandWithResult } from "../tools/commands";
+import { ModelSettings } from "../slash/providers-models";
+import { createModelCommands } from "../slash/models";
 
 class TestTerminal extends ProcessTerminal {
     input: ((data: string) => void) | undefined;

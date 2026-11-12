@@ -1,16 +1,16 @@
 import path from "node:path";
 import { tool, zodSchema, type ToolSet } from "ai";
 import { z } from "zod";
-import { AGENTS, TOOLS } from "./tools";
-import { DEFAULT_AGENTS, selectFlowTools } from "./agents";
-import { WORKDIR } from "./config";
-import { askTerminal } from "./terminalInput";
-import type { Session } from "./sessionStore";
-import { withSpinner } from "./spinner";
-import { runSubagent } from "./tools/subagents";
+import { AGENTS, TOOLS } from "../tools/tools-definitions";
+import { DEFAULT_AGENTS, selectFlowTools } from "../features/agents";
+import { WORKDIR } from "../config";
+import { askTerminal } from "../UI/terminalInput";
+import type { Session } from "../features/sessionStore";
+import { withSpinner } from "../UI/spinner";
+import { runSubagent } from "../tools/subagents";
 import { planSchema, reportSchema, taskStatusSchema } from "./flowStore";
 import { validateVerificationEvidence, type FlowAgentRun } from "./flow";
-import { executeCommandWithResult } from "./tools/commands";
+import { executeCommandWithResult } from "../tools/commands";
 
 export const runFlowAgent = async (
     run: FlowAgentRun,

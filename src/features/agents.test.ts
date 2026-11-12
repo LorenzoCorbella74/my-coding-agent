@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { AgentLoader, DEFAULT_AGENTS, selectAgentTools, selectDiscussionTools, selectFlowTools } from "./agents";
-import { parseFrontmatter } from "./frontmatter";
+import { parseFrontmatter } from "../utils/frontmatter";
 
 const tools = {
     read_file: {}, read_files: {}, explore_workspace: {}, searchCode: {},

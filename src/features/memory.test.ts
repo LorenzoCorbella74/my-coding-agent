@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { createMemoryTool, MemoryStore, memoryInputSchema } from "./memory";
-import { createParentTools, TOOLS } from "./tools";
+import { createParentTools, TOOLS } from "../tools/tools-definitions";
 import { selectAgentTools } from "./agents";
 
 test("persists scoped Markdown entries, updates keys and reloads project overrides without losing global preferences", () => {

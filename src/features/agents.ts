@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { parseFrontmatter } from "./frontmatter";
+import { parseFrontmatter } from "../utils/frontmatter";
 
 const agentSchema = z.object({
     name: z.string().trim().min(1).optional(),

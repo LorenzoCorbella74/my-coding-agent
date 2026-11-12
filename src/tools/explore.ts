@@ -1,6 +1,6 @@
 import path from "path";
 import { WORKDIR } from "../config";
-import { safePath, normalizeGlob, getProjectExclusions, isExcludedWorkspacePath } from "../tools";
+import { safePath, normalizeGlob, getProjectExclusions, isExcludedWorkspacePath } from "./tools-definitions";
 import fs from "fs";
 
 export const runExploreWorkspace = ({

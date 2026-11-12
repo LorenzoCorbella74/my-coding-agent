@@ -1,6 +1,6 @@
 import path from "path";
 import { WORKDIR } from "../config";
-import { safePath, MAX_SEARCH_FILE_BYTES, MAX_READ_CHARS, getProjectExclusions, normalizeGlob, isExcludedWorkspacePath } from "../tools";
+import { safePath, MAX_SEARCH_FILE_BYTES, MAX_READ_CHARS, getProjectExclusions, normalizeGlob, isExcludedWorkspacePath } from "./tools-definitions";
 import fs from "fs";
 
 export const runSearchCode = ({

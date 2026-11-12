@@ -1,4 +1,4 @@
-import { safePath } from "../tools";
+import { safePath } from "./tools-definitions";
 import fs from "fs";
 import path from "path";
 

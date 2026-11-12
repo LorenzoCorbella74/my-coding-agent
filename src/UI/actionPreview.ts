@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { safePath } from "./paths";
+import { safePath } from "../utils/paths";
 
 const writeSchema = z.object({ filePath: z.string(), content: z.string() });
 const editSchema = z.object({ filePath: z.string(), oldText: z.string(), newText: z.string() });

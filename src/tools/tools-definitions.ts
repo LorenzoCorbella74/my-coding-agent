@@ -4,20 +4,20 @@ import { z } from "zod";
 import path from "path";
 import fs from "fs";
 
-import { executeCommand } from "./tools/commands";
-import { runRead, runReadMany } from "./tools/read";
-import { runEdit } from "./tools/edit";
-import { runWrite } from "./tools/write";
-import { runExploreWorkspace } from "./tools/explore";
-import { runSearchCode } from "./tools/search";
-import { GLOBAL_DATA_DIR, WORKDIR } from "./config";
-import { SkillLoader } from "./skills";
-import { runSubagent } from "./tools/subagents";
-import type { Session } from "./sessionStore";
-import type { createSpinner } from "./spinner";
-import { AgentLoader, selectDiscussionTools } from "./agents";
-import { webSearch, webExtract } from "./tools/web";
-import { createMemoryTool, memoryStore } from "./memory";
+import { executeCommand } from "./commands";
+import { runRead, runReadMany } from "./read";
+import { runEdit } from "./edit";
+import { runWrite } from "./write";
+import { runExploreWorkspace } from "./explore";
+import { runSearchCode } from "./search";
+import { GLOBAL_DATA_DIR, WORKDIR } from "../config";
+import { SkillLoader } from "../features/skills";
+import { runSubagent } from "./subagents";
+import type { Session } from "../features/sessionStore";
+import type { createSpinner } from "../UI/spinner";
+import { AgentLoader, selectDiscussionTools } from "../features/agents";
+import { webSearch, webExtract } from "./web";
+import { createMemoryTool, memoryStore } from "../features/memory";
 
 export const MAX_READ_CHARS = 50000;
 export const MAX_BATCH_READ_FILES = 20;
@@ -31,7 +31,7 @@ const SKILLS = new SkillLoader([path.join(GLOBAL_DATA_DIR, "skills"), path.join(
 export const SKILLS_DESCRIPTIONS = SKILLS.getDescriptions();
 export const getSkillsTable = () => SKILLS.getTable();
 
-export { safePath } from "./paths";
+export { safePath } from "../utils/paths";
 
 export const normalizeGlob = (pattern: string) => pattern.replaceAll("\\", "/").replace(/^\/+/, "");
 

@@ -1,6 +1,6 @@
 import type { ModelMessage } from "ai";
 import { generateText } from "ai";
-import { modelSettings } from "./models";
+import { modelSettings } from "../slash/providers-models";
 
 const KEEP_RECENT = 3;
 const PRESERVE_TOOLS = new Set(["read_file"]);

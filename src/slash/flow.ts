@@ -1,4 +1,4 @@
-import type { FlowRole } from "./agents";
+import type { FlowRole } from "../features/agents";
 import { FlowStore, type Flow, type FlowPlan, type FlowReport, type taskStatusSchema } from "./flowStore";
 import type { z } from "zod";
 

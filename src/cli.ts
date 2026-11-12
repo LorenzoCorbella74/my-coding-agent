@@ -2,6 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import packageJson from '../package.json' with { type: 'json' };
 
+/**
+ *  FILE ENTRY POINT PER LA CLI DI CORBEAGENT
+ */
+
 const printHelp = () => {
     console.log(`CorbeAgent ${packageJson.version}
 
@@ -48,6 +52,7 @@ if (!fs.existsSync(workspace) || !fs.statSync(workspace).isDirectory()) {
 
 process.env.CORBEAGENT_WORKDIR = workspace;
 try {
+    // Import the main entry point of the application
     await import('./index.js');
 } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
