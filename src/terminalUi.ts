@@ -5,7 +5,7 @@ import { getActionPreview } from "./actionPreview";
 import { readdir } from "node:fs/promises";
 import path from "node:path";
 import {
-    CombinedAutocompleteProvider, Container, Editor, Loader, Markdown, matchesKey,
+    CombinedAutocompleteProvider, Container, CURSOR_MARKER, Editor, Input, Loader, Markdown, matchesKey,
     ProcessTerminal, ScrollView, SelectList, Spacer, Text, TuiAltScreen, VStack,
     stripTerminalSequences,
     truncateToWidth,
@@ -100,6 +100,7 @@ export class TerminalUi {
     private closed = false;
     private cancelSelection: (() => void) | undefined;
     onInterrupt: (() => void) | undefined;
+    onReasoning: (() => void) | undefined;
 
     constructor(workspace: string, commands: SlashCommand[], terminal: Terminal = new ProcessTerminal()) {
         this.tui = new TuiAltScreen(terminal);
@@ -137,6 +138,10 @@ export class TerminalUi {
             this.activatePrompt();
         };
         this.tui.addInputListener((data) => {
+            if (matchesKey(data, "alt+r") && this.editor.showUserPrefix && !this.editor.disableSubmit && !this.cancelSelection) {
+                this.onReasoning?.();
+                return { consume: true };
+            }
             if (!matchesKey(data, "ctrl+c")) return undefined;
             this.onInterrupt?.();
             this.cancelSelection?.();
@@ -172,11 +177,46 @@ export class TerminalUi {
         this.tui.requestRender();
     }
 
-    select(title: string, items: SelectItem[], selectedIndex = 0): Promise<string | undefined> {
+    input(title: string, options: { secret?: boolean; initial?: string } = {}): Promise<string | undefined> {
+        if (this.closed) return Promise.reject(new Error("Terminal UI is closed."));
+        if (this.cancelSelection) return Promise.reject(new Error("A selection is already open."));
+        return new Promise((resolve) => {
+            const input = new Input();
+            input.setValue(options.initial ?? "");
+            input.handleInput("\x05");
+            const submitDisabled = this.editor.disableSubmit;
+            this.editor.disableSubmit = true;
+            this.selection.addChild(new Text(chalk.bold.cyan(title), 1, 0));
+            this.selection.addChild({
+                render: (width) => options.secret
+                    ? [truncateToWidth(`> ${"*".repeat(input.getValue().length)}`, Math.max(0, width - 1), "") + CURSOR_MARKER + chalk.inverse(" ")]
+                    : input.render(width),
+                invalidate: () => input.invalidate(),
+            });
+            const finish = (value?: string) => {
+                input.setValue("");
+                this.selection.clear();
+                this.cancelSelection = undefined;
+                this.editor.disableSubmit = submitDisabled;
+                this.tui.setFocus(this.editor);
+                this.activatePrompt();
+                resolve(value);
+            };
+            input.onSubmit = (value) => finish(value);
+            input.onEscape = () => finish();
+            this.cancelSelection = () => finish();
+            this.tui.setFocus(input);
+            this.tui.requestRender();
+        });
+    }
+
+    select(title: string, items: SelectItem[], selectedIndex = 0, searchable = false): Promise<string | undefined> {
         if (this.closed) return Promise.reject(new Error("Terminal UI is closed."));
         if (this.cancelSelection) return Promise.reject(new Error("A selection is already open."));
         return new Promise((resolve) => {
             let visibleRows = 6;
+            let visibleItems = items;
+            const filter = new Input({ prompt: "Cerca: " });
             let list = new SelectList(items, visibleRows, selectTheme);
             list.setSelectedIndex(selectedIndex);
             const submitDisabled = this.editor.disableSubmit;
@@ -193,20 +233,36 @@ export class TerminalUi {
                 capturesViewportInput: false,
                 render: (width) => {
                     const rows = Math.min(6, Math.max(1, this.tui.terminal.rows - this.editor.render(width).length
-                        - this.footer.render(width).length - this.status.render(width).length - headingView.render(width).length - 2));
+                        - this.footer.render(width).length - this.status.render(width).length - headingView.render(width).length - 2 - Number(searchable)));
                     if (rows !== visibleRows) {
                         const previous = list;
-                        list = new SelectList(items, rows, selectTheme);
-                        list.setSelectedIndex(items.findIndex((item) => item.value === previous.getSelectedItem()?.value));
+                        list = new SelectList(visibleItems, rows, selectTheme);
+                        list.setSelectedIndex(visibleItems.findIndex((item) => item.value === previous.getSelectedItem()?.value));
                         if (previous.onSelect) list.onSelect = previous.onSelect;
                         if (previous.onCancel) list.onCancel = previous.onCancel;
                         visibleRows = rows;
                     }
-                    return list.render(width);
+                    return [...(searchable ? filter.render(width) : []), ...list.render(width)];
                 },
                 invalidate: () => list.invalidate(),
-                handleInput: (data) => list.handleInput(data),
-                handleMouse: (event) => list.handleMouse(event),
+                handleInput: (data) => {
+                    if (!searchable || (["up", "down", "pageUp", "pageDown", "enter", "escape", "ctrl+p", "ctrl+n"] as const).some((key) => matchesKey(data, key))) {
+                        list.handleInput(data);
+                        return;
+                    }
+                    filter.handleInput(data);
+                    const query = filter.getValue().toLowerCase();
+                    visibleItems = items.filter((item) => `${item.label} ${item.value} ${item.description ?? ""}`.toLowerCase().includes(query));
+                    const previous = list;
+                    list = new SelectList(visibleItems, visibleRows, selectTheme);
+                    if (previous.onSelect) list.onSelect = previous.onSelect;
+                    if (previous.onCancel) list.onCancel = previous.onCancel;
+                    this.tui.requestRender();
+                },
+                handleMouse: (event) => {
+                    if (searchable && event.y === 0) return filter.handleMouse(event);
+                    return list.handleMouse({ ...event, y: event.y - Number(searchable) });
+                },
             };
             this.selection.addChild(headingView);
             this.selection.addChild(selectionView);

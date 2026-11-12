@@ -10,7 +10,7 @@ import { runEdit } from "./tools/edit";
 import { runWrite } from "./tools/write";
 import { runExploreWorkspace } from "./tools/explore";
 import { runSearchCode } from "./tools/search";
-import { WORKDIR } from "./config";
+import { GLOBAL_DATA_DIR, WORKDIR } from "./config";
 import { SkillLoader } from "./skills";
 import { runSubagent } from "./tools/subagents";
 import type { Session } from "./sessionStore";
@@ -26,7 +26,7 @@ export const DEFAULT_EXCLUDED_DIRS = new Set([
 ]);
 
 
-const SKILLS = new SkillLoader()
+const SKILLS = new SkillLoader([path.join(GLOBAL_DATA_DIR, "skills"), path.join(WORKDIR, ".corbecode", "skills")]);
 export const SKILLS_DESCRIPTIONS = SKILLS.getDescriptions();
 export const getSkillsTable = () => SKILLS.getTable();
 
@@ -139,7 +139,7 @@ export const TOOLS = {
 
 };
 
-export const AGENTS = new AgentLoader(WORKDIR, TOOLS);
+export const AGENTS = new AgentLoader(WORKDIR, TOOLS, GLOBAL_DATA_DIR);
 export const AGENTS_DESCRIPTIONS = AGENTS.getDescriptions();
 const GENERAL_PURPOSE_AGENT = "general-purpose";
 const resolveAgent = (name: string | undefined) => {

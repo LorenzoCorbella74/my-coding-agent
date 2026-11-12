@@ -13,6 +13,8 @@ import { consumeTextStream } from "./agentStream";
 import { formatToolActivity } from "./toolActivity";
 import type { TextStreamPart, ToolSet } from "ai";
 import { executeCommandWithResult } from "./tools/commands";
+import { ModelSettings } from "./models";
+import { createModelCommands } from "./modelCommands";
 
 class TestTerminal extends ProcessTerminal {
     input: ((data: string) => void) | undefined;
@@ -279,6 +281,128 @@ test("selects sessions with arrows and Enter and cancels with Escape", async () 
     }
 });
 
+test("masks credential input and never adds secrets to transcript or editor history, including cancellation", async () => {
+    const terminal = new TestTerminal();
+    const ui = new TerminalUi(tmpdir(), [], terminal);
+    try {
+        ui.start();
+        const secret = "test-secret-that-must-not-leak";
+        const input = ui.input("API key", { secret: true });
+        terminal.input?.(`\x1b[200~${secret}\x1b[201~`);
+        ui.tui.renderNow();
+        assert.doesNotMatch(ui.tui.getScreenLines().join("\n"), new RegExp(secret));
+        assert.match(ui.tui.getScreenLines().join("\n"), /\*{10}/);
+        terminal.input?.("\r");
+        assert.equal(await input, secret);
+        const cancelled = ui.input("API key", { secret: true });
+        terminal.input?.("cancelled-test-secret");
+        terminal.input?.("\x1b");
+        assert.equal(await cancelled, undefined);
+        const chat = ui.ask("YOU >");
+        terminal.input?.("\x1b[A");
+        assert.doesNotMatch(ui.editor.getText(), /secret/);
+        terminal.input?.("hello");
+        terminal.input?.("\r");
+        await chat;
+        ui.tui.renderNow();
+        assert.doesNotMatch(terminal.output, /test-secret-that-must-not-leak|cancelled-test-secret/);
+        assert.doesNotMatch(ui.transcript.render(80).join("\n"), /secret/);
+    } finally {
+        ui.close();
+    }
+});
+
+test("searches models by substring and Alt+R changes reasoning only at the chat prompt, preserving the draft", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "corbecode-model-controls-"));
+    const terminal = new TestTerminal();
+    const ui = new TerminalUi(root, [], terminal);
+    try {
+        const settings = new ModelSettings(path.join(root, "config.json"), {});
+        settings.saveProvider("local", { type: "ollama", name: "Local", baseURL: "http://localhost:11434/v1" });
+        settings.select("local", { id: "coding", name: "Coding", control: { kind: "effort", levels: ["low", "high"] } });
+        ui.start();
+        const models = ui.select("Models", [
+            { value: "first", label: "OpenAI / General" }, { value: "second", label: "Ollama / Local coding model" },
+        ], 0, true);
+        terminal.input?.("coding");
+        ui.tui.renderNow();
+        assert.doesNotMatch(ui.tui.getScreenLines().join("\n"), /OpenAI/);
+        terminal.input?.("\r");
+        assert.equal(await models, "second");
+        const commands = createModelCommands(ui, settings, () => { });
+        let changed: Promise<void> | undefined;
+        ui.onReasoning = () => { changed = commands.reasoning(); };
+        terminal.input?.("\x1br");
+        assert.equal(changed, undefined);
+        const chat = ui.ask("YOU >");
+        terminal.input?.("unfinished draft");
+        terminal.input?.("\x1br");
+        assert.ok(changed);
+        terminal.input?.("\x1b[B");
+        terminal.input?.("\r");
+        await changed;
+        assert.equal(settings.current()?.reasoning, "low");
+        assert.equal(ui.editor.getText(), "unfinished draft");
+        terminal.input?.("\r");
+        assert.equal(await chat, "unfinished draft");
+        changed = undefined;
+        const approval = ui.ask("Execute? [s/N]");
+        terminal.input?.("\x1br");
+        assert.equal(changed, undefined);
+        terminal.input?.("n");
+        terminal.input?.("\r");
+        assert.equal(await approval, "n");
+    } finally {
+        ui.close();
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("logs in and selects a model through the real UI, without persisting rejected credentials", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "corbecode-login-"));
+    const terminal = new TestTerminal();
+    const ui = new TerminalUi(root, [], terminal);
+    try {
+        let valid = false;
+        const key = "test-login-credential";
+        const fetcher: typeof fetch = async (input, init) => {
+            assert.equal(new Headers(init?.headers).get("Authorization"), `Bearer ${key}`);
+            if (String(input).endsWith("/key")) return new Response("{}", { status: valid ? 200 : 401 });
+            return Response.json({ data: [{ id: "provider/coder", name: "Coding model", supported_parameters: ["tools"] }] });
+        };
+        const settings = new ModelSettings(path.join(root, "config.json"), {}, fetcher);
+        const commands = createModelCommands(ui, settings, () => { });
+        const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
+        ui.start();
+        const rejected = commands.login();
+        terminal.input?.("\r");
+        await tick();
+        terminal.input?.(key);
+        terminal.input?.("\r");
+        await rejected;
+        assert.deepEqual(settings.providers(), {});
+        valid = true;
+        const accepted = commands.login();
+        terminal.input?.("\r");
+        await tick();
+        terminal.input?.(key);
+        terminal.input?.("\r");
+        await accepted;
+        assert.equal(settings.provider("openrouter").apiKey, key);
+        const selection = commands.models();
+        await tick();
+        terminal.input?.("coder");
+        terminal.input?.("\r");
+        await selection;
+        assert.equal(new ModelSettings(settings.file, {}).current()?.model, "provider/coder");
+        assert.doesNotMatch(ui.transcript.render(80).join("\n"), new RegExp(key));
+        assert.doesNotMatch(terminal.output, new RegExp(key));
+    } finally {
+        ui.close();
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
 test("keeps loading visible after workflow and tool approval with a full transcript", async () => {
     const terminal = new TestTerminal();
     const ui = new TerminalUi(tmpdir(), [], terminal);
@@ -405,6 +529,25 @@ test("renders available skill names and descriptions as a Markdown table", () =>
     } finally {
         setSKILLS_DIR(previous);
         rmSync(directory, { recursive: true, force: true });
+    }
+});
+
+test("loads global skills and lets workspace skills override them", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "corbecode-global-skills-"));
+    const globalSkills = path.join(root, "global", "skills");
+    const workspaceSkills = path.join(root, "workspace", ".corbecode", "skills");
+    try {
+        mkdirSync(path.join(globalSkills, "shared"), { recursive: true });
+        mkdirSync(path.join(globalSkills, "personal"), { recursive: true });
+        mkdirSync(path.join(workspaceSkills, "shared"), { recursive: true });
+        writeFileSync(path.join(globalSkills, "shared", "SKILL.md"), "---\ndescription: Global skill\n---\nGlobal instructions.");
+        writeFileSync(path.join(globalSkills, "personal", "SKILL.md"), "---\ndescription: Personal skill\n---\nPersonal instructions.");
+        writeFileSync(path.join(workspaceSkills, "shared", "SKILL.md"), "---\ndescription: Workspace skill\n---\nWorkspace instructions.");
+        const loader = new SkillLoader([globalSkills, workspaceSkills]);
+        assert.match(loader.getContent("shared"), /Workspace instructions/);
+        assert.match(loader.getContent("personal"), /Personal instructions/);
+    } finally {
+        rmSync(root, { recursive: true, force: true });
     }
 });
 

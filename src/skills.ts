@@ -15,17 +15,18 @@ interface Skill {
 export class SkillLoader {
     private skills: Record<string, Skill> = {};
 
-    constructor() {
-        const skillsDir = getSKILLS_DIR();
-        fs.mkdirSync(skillsDir, { recursive: true });
-        for (const entry of fs.readdirSync(skillsDir, { withFileTypes: true })) {
-            if (!entry.isDirectory()) continue;
-            const skillFile = path.join(skillsDir, entry.name, 'SKILL.md');
-            if (!fs.existsSync(skillFile)) continue;
-            const text = fs.readFileSync(skillFile, "utf8");
-            const { meta, body } = this.parseFrontmatter(text);
-            const name = meta["name"] ?? entry.name;
-            this.skills[name] = { meta, body };
+    constructor(skillsDirectories = [getSKILLS_DIR()]) {
+        for (const skillsDir of skillsDirectories) {
+            fs.mkdirSync(skillsDir, { recursive: true });
+            for (const entry of fs.readdirSync(skillsDir, { withFileTypes: true })) {
+                if (!entry.isDirectory()) continue;
+                const skillFile = path.join(skillsDir, entry.name, 'SKILL.md');
+                if (!fs.existsSync(skillFile)) continue;
+                const text = fs.readFileSync(skillFile, "utf8");
+                const { meta, body } = this.parseFrontmatter(text);
+                const name = meta["name"] ?? entry.name;
+                this.skills[name] = { meta, body };
+            }
         }
     }
 

@@ -80,24 +80,29 @@ export const selectDiscussionTools = <T>(tools: Record<string, T>): Record<strin
 export class AgentLoader {
     private readonly agents = new Map<string, CustomAgent>(Object.entries(DEFAULT_AGENTS));
 
-    constructor(workspace: string, tools: Record<string, unknown>) {
-        const directory = path.join(workspace, ".corbecode", "agents");
-        fs.mkdirSync(directory, { recursive: true });
-        const customNames = new Set<string>();
-        for (const entry of fs.readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-            if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
-            const file = path.join(directory, entry.name);
-            try {
-                const { meta, body } = parseFrontmatter(fs.readFileSync(file, "utf8"));
-                const metadata = agentSchema.parse(meta);
-                const name = metadata.name ?? entry.name.replace(/(?:\.agent)?\.md$/, "");
-                if (!body.trim()) throw new Error("Agent instructions must not be empty");
-                if (customNames.has(name)) throw new Error(`Duplicate agent name: ${name}`);
-                selectAgentTools(tools, metadata.tools);
-                customNames.add(name);
-                this.agents.set(name, { name, description: metadata.description, tools: metadata.tools, body });
-            } catch (error) {
-                throw new Error(`Invalid custom agent ${file}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+    constructor(workspace: string, tools: Record<string, unknown>, globalDataDirectory?: string) {
+        const directories = [
+            ...(globalDataDirectory ? [path.join(globalDataDirectory, "agents")] : []),
+            path.join(workspace, ".corbecode", "agents"),
+        ];
+        for (const directory of directories) {
+            fs.mkdirSync(directory, { recursive: true });
+            const customNames = new Set<string>();
+            for (const entry of fs.readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+                if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+                const file = path.join(directory, entry.name);
+                try {
+                    const { meta, body } = parseFrontmatter(fs.readFileSync(file, "utf8"));
+                    const metadata = agentSchema.parse(meta);
+                    const name = metadata.name ?? entry.name.replace(/(?:\.agent)?\.md$/, "");
+                    if (!body.trim()) throw new Error("Agent instructions must not be empty");
+                    if (customNames.has(name)) throw new Error(`Duplicate agent name: ${name}`);
+                    selectAgentTools(tools, metadata.tools);
+                    customNames.add(name);
+                    this.agents.set(name, { name, description: metadata.description, tools: metadata.tools, body });
+                } catch (error) {
+                    throw new Error(`Invalid custom agent ${file}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+                }
             }
         }
     }

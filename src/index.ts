@@ -8,7 +8,9 @@ import type { ModelMessage } from "ai";
 import packageJson from "../package.json" with { type: "json" };
 import { createParentTools, TOOLS } from "./tools";
 import { askTerminal, closeTerminalInput, getApprovalDecision } from "./terminalInput";
-import { WORKDIR, api, MODEL, CONTEXT_LIMIT } from "./config";
+import { GLOBAL_DATA_DIR, WORKDIR } from "./config";
+import { modelSettings } from "./models";
+import { createModelCommands } from "./modelCommands";
 import { SessionStore } from "./sessionStore";
 import { SKILLS_DESCRIPTIONS, AGENTS_DESCRIPTIONS, getSkillsTable } from "./tools";
 import { readWorkspaceInstructions } from "./workspaceInstructions";
@@ -43,7 +45,7 @@ Act, dont explain or explain briefly if task was long.
 
 ${workspaceInstructions ? `Workspace instructions from AGENTS.md:\n${workspaceInstructions}` : ""}`;
 
-const sessionStore = new SessionStore(WORKDIR);
+const sessionStore = new SessionStore(WORKDIR, GLOBAL_DATA_DIR);
 const flowStore = new FlowStore(WORKDIR);
 const recoveredFlow = flowStore.recover();
 let activeSession = sessionStore.resumeOrCreate();
@@ -54,10 +56,11 @@ let requestController: AbortController | undefined;
 /** AGENT LOOP */
 const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
 
+  const modelRequest = modelSettings.request();
   microCompact(messages);
   const estTokens = estimateTokens(messages);
   writeMessage(orange(`${chalk.bold("Tokens usati finora:")} ${estTokens}`));
-  if (estTokens > CONTEXT_LIMIT) {
+  if (estTokens > modelSettings.contextLimit()) {
     writeMessage(`compacting at ${estTokens}`);
     const compacted = await withSpinner("Compressing context", () => autoCompact(messages, requestController?.signal));
     if (messages === history) sessionStore.replace(activeSession.id, compacted);
@@ -69,7 +72,7 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
   const workingMessages = [...messages];
   const generate = (inputMessages: ModelMessage[]) => withSpinner("Thinking", async (spinner) => {
     const result = streamText({
-      model: api(MODEL),
+      ...modelRequest,
       system: `${SYSTEM_PROMPT}\n\n${flowChatContext(flowStore.current())}`,
       messages: inputMessages,
       ...(requestController && { abortSignal: requestController.signal }),
@@ -181,7 +184,22 @@ const exitChat: SlashCommandHandler = async () => {
   return true;
 };
 
+const configureModel = async (run: (signal: AbortSignal) => Promise<void>): Promise<boolean> => {
+  requestController = new AbortController();
+  try {
+    await run(requestController.signal);
+  } finally {
+    requestController = undefined;
+  }
+  return false;
+};
+
 const slashCommands: Record<string, SlashCommandHandler> = {
+  "/login": async () => configureModel((signal) => modelCommands.login(signal)),
+  "/models": async (args) => {
+    if (args && args !== "refresh") throw new Error("Usage: /models [refresh]");
+    return configureModel((signal) => modelCommands.models(args === "refresh", signal));
+  },
   "/verbose": async () => {
     ui.verbose = !ui.verbose;
     writeMessage(chalk.cyan(`Verbose: ${ui.verbose ? "ON" : "OFF"}`));
@@ -355,6 +373,8 @@ const chat = async (): Promise<void> => {
   }
 };
 
+const startupModel = modelSettings.current();
+if (startupModel) modelSettings.provider(startupModel.provider);
 const ui = startTerminalUi(WORKDIR, Object.keys(slashCommands).map((command) => ({
   name: command.slice(1),
   description: {
@@ -362,6 +382,7 @@ const ui = startTerminalUi(WORKDIR, Object.keys(slashCommands).map((command) => 
     "/compress": "Compress the conversation", "/quit": "Quit", "/exit": "Quit",
     "/skills": "List available skills",
     "/verbose": "Toggle tool execution details",
+    "/login": "Configure provider credentials", "/models": "Select provider and model; refresh reloads catalogs",
   }[command] ?? FLOW_COMMANDS[command] ?? "",
 })));
 ui.onInterrupt = () => requestController?.abort();
@@ -371,12 +392,21 @@ ui.writeHeader([
   "| |  | | | | |_) |  _ \\|  _|   | |  | | | | | | |  _|",
   "| |__| |_| |  _ <| |_) | |___  | |__| |_| | |_| | |___",
   " \\____\\___/|_| \\_\\____/|_____|  \\____\\___/|____/|_____|",
-].join("\n"), "Enter: invia | Alt+Enter: nuova riga | /: comandi | @: file | PgUp/PgDn: cronologia | Ctrl+C: annulla/esci");
+].join("\n"), "Enter: invia | Alt+Enter: nuova riga | Alt+R: reasoning | /: comandi | @: file | PgUp/PgDn: cronologia | Ctrl+C: annulla/esci");
 const updateFooter = () => {
   const flow = flowStore.current();
-  ui.setFooter(`Version ${packageJson.version} | Model: ${MODEL} | Session ${activeSession.id.slice(0, 8)}${flow ? ` | Flow ${flow.id.slice(0, 8)} ${flow.phase}` : ""}`);
+  const current = modelSettings.current();
+  const model = current ? `${modelSettings.provider(current.provider).name} / ${current.model} | Reasoning: ${current.control ? current.reasoning : "N/A"}` : "nessuno (/login, /models)";
+  ui.setFooter(`Version ${packageJson.version} | Model: ${model} | Session ${activeSession.id.slice(0, 8)}${flow ? ` | Flow ${flow.id.slice(0, 8)} ${flow.phase}` : ""}`);
+};
+const modelCommands = createModelCommands(ui, modelSettings, updateFooter);
+ui.onReasoning = () => {
+  void modelCommands.reasoning().catch((error: unknown) => writeMessage(chalk.red(error instanceof Error ? error.message : String(error))));
 };
 updateFooter();
+if (!startupModel) writeMessage("Configura un provider con /login, poi scegli il modello con /models.");
+const modelOverrides = modelSettings.environmentOverrides();
+if (modelOverrides.length) writeMessage(`Override modello da ambiente: ${modelOverrides.join(", ")}. Rimuovili per usare la selezione globale salvata.`);
 if (recoveredFlow) writeMessage(`Change corrente ripresa: ${recoveredFlow.id.slice(0, 8)} ${recoveredFlow.title} (${recoveredFlow.phase}). Nessuna esecuzione automatica. /flow:resume per i dettagli, /flow:apply per continuare, /flow:pause per la chat libera.`);
 try {
   await chat();

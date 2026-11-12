@@ -1,6 +1,7 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
     appendFileSync,
+    copyFileSync,
     existsSync,
     mkdirSync,
     readFileSync,
@@ -39,13 +40,57 @@ export class SessionStore {
     private readonly activeFile: string;
     private readonly ignoreFile: string;
 
-    constructor(workspaceRoot: string) {
-        const dataDirectory = path.join(workspaceRoot, ".corbecode");
-        this.sessionsDirectory = path.join(dataDirectory, "sessions");
+    constructor(workspaceRoot: string, globalDataDirectory?: string) {
+        const dataDirectory = globalDataDirectory
+            ? this.getGlobalWorkspaceDirectory(workspaceRoot, globalDataDirectory)
+            : path.join(workspaceRoot, ".corbecode");
+        this.sessionsDirectory = globalDataDirectory ? dataDirectory : path.join(dataDirectory, "sessions");
         this.activeFile = path.join(dataDirectory, "active-session");
         this.ignoreFile = path.join(dataDirectory, ".gitignore");
         mkdirSync(this.sessionsDirectory, { recursive: true });
-        this.ensureGitIgnore();
+        if (!globalDataDirectory) this.ensureGitIgnore();
+    }
+
+    private getGlobalWorkspaceDirectory(workspaceRoot: string, globalDataDirectory: string): string {
+        const resolvedWorkspace = path.resolve(workspaceRoot);
+        const workspaceKey = createHash("sha256")
+            .update(process.platform === "win32" ? resolvedWorkspace.toLowerCase() : resolvedWorkspace)
+            .digest("hex");
+        const workspaceName = path.basename(resolvedWorkspace)
+            .replace(/[<>:"/\\|?*\x00-\x1f]/g, "-")
+            .replace(/[. ]+$/g, "")
+            .slice(0, 64) || "workspace";
+        const sessionsDirectory = path.join(globalDataDirectory, "sessions");
+        const dataDirectory = path.join(sessionsDirectory, `${workspaceName}-${workspaceKey}`);
+        const legacyDirectory = path.join(workspaceRoot, ".corbecode");
+        const globalState = path.join(dataDirectory, "active-session");
+        if (!existsSync(globalState)) {
+            mkdirSync(dataDirectory, { recursive: true });
+            const previousGlobalDirectory = path.join(sessionsDirectory, workspaceKey);
+            for (const source of [
+                { directory: previousGlobalDirectory, sessions: previousGlobalDirectory },
+                { directory: legacyDirectory, sessions: path.join(legacyDirectory, "sessions") },
+            ]) {
+                if (!existsSync(source.directory)) continue;
+                this.copySessionFiles(source.sessions, dataDirectory);
+                const sourceState = path.join(source.directory, "active-session");
+                if (existsSync(sourceState) && !existsSync(globalState)) copyFileSync(sourceState, globalState);
+            }
+        }
+        return dataDirectory;
+    }
+
+    private copySessionFiles(sourceDirectory: string, targetDirectory: string): void {
+        if (!existsSync(sourceDirectory)) return;
+        for (const entry of readdirSync(sourceDirectory, { withFileTypes: true })) {
+            const target = path.join(targetDirectory, entry.name);
+            if (
+                entry.isFile() && entry.name.endsWith(".jsonl") &&
+                SESSION_ID_PATTERN.test(entry.name.slice(0, -6)) && !existsSync(target)
+            ) {
+                copyFileSync(path.join(sourceDirectory, entry.name), target);
+            }
+        }
     }
 
     resumeOrCreate(): Session {

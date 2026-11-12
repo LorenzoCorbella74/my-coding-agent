@@ -79,6 +79,26 @@ test("accepts boolean user-invocable without disabling subagent discovery", () =
     }
 });
 
+test("loads global custom agents and lets workspace agents override them", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "corbecode-global-agents-"));
+    const workspace = path.join(root, "workspace");
+    const globalAgents = path.join(root, "global", "agents");
+    const workspaceAgents = path.join(workspace, ".corbecode", "agents");
+    mkdirSync(globalAgents, { recursive: true });
+    mkdirSync(workspaceAgents, { recursive: true });
+    try {
+        writeFileSync(path.join(globalAgents, "shared.md"), "---\nname: Shared\ndescription: Global version\n---\nGlobal instructions.");
+        writeFileSync(path.join(globalAgents, "personal.md"), "---\ndescription: Personal agent\n---\nPersonal instructions.");
+        writeFileSync(path.join(workspaceAgents, "shared.md"), "---\nname: Shared\ndescription: Workspace version\n---\nWorkspace instructions.");
+        const loader = new AgentLoader(workspace, tools, path.join(root, "global"));
+        assert.equal(loader.get("Shared").description, "Workspace version");
+        assert.equal(loader.get("Shared").body, "Workspace instructions.");
+        assert.equal(loader.get("personal").description, "Personal agent");
+    } finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
 test("ships four default agents and supports explicit workflow role mapping", () => {
     const workspace = mkdtempSync(path.join(tmpdir(), "corbecode-default-agents-"));
     try {

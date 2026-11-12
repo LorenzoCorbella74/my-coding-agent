@@ -1,6 +1,7 @@
 import { streamText, isLoopFinished, isStepCount, type ModelMessage, type ToolSet } from "ai";
 import { consumeTextStream } from "../agentStream";
-import { api, MODEL, WORKDIR } from "../config";
+import { WORKDIR } from "../config";
+import { modelSettings } from "../models";
 import { TOOLS } from "../tools";
 import chalk from "chalk";
 import { lavender } from "../palette";
@@ -23,6 +24,7 @@ export const runSubagent = async (
     abortSignal?: AbortSignal,
     options: { tools?: ToolSet; system?: string; shouldStop?: () => boolean; forceShellApproval?: boolean } = {},
 ): Promise<string> => {
+    const modelRequest = modelSettings.request();
     const label = `Subagent ${agent?.name ?? "Generic"}`;
     spinner.start(`${label} thinking...`);
     const messages: ModelMessage[] = [{ role: "user", content: prompt }];
@@ -37,7 +39,7 @@ export const runSubagent = async (
     ].filter(Boolean).join("\n\n");
     const generate = async () => {
         const result = streamText({
-            model: api(MODEL),
+            ...modelRequest,
             ...(abortSignal && { abortSignal }),
             system,
             messages,

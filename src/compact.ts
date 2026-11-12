@@ -1,6 +1,6 @@
 import type { ModelMessage } from "ai";
 import { generateText } from "ai";
-import { MODEL, api, CONTEXT_LIMIT } from "./config";
+import { modelSettings } from "./models";
 
 const KEEP_RECENT = 3;
 const PRESERVE_TOOLS = new Set(["read_file"]);
@@ -55,7 +55,7 @@ export const microCompact = (messages: ModelMessage[]): void => {
 export const autoCompact = async (messages: ModelMessage[], abortSignal?: AbortSignal):
     Promise<ModelMessage[]> => {
     const { text } = await generateText({
-        model: api.chat(MODEL),
+        ...modelSettings.request(),
         ...(abortSignal && { abortSignal }),
         messages: [
             {
@@ -68,7 +68,7 @@ export const autoCompact = async (messages: ModelMessage[], abortSignal?: AbortS
         3) Key decisions made.
         Be concise.
 
-        ${JSON.stringify(messages).slice(-CONTEXT_LIMIT)}
+        ${JSON.stringify(messages).slice(-modelSettings.contextLimit())}
         `,
             }
         ]
