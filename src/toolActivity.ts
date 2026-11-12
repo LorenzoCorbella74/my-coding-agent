@@ -21,6 +21,7 @@ const ACTIVITIES = new Map<string, (input: unknown) => Activity>([
     ["shell", (input) => ({ icon: "❯", label: `bash: ${oneLine(field(input, "command"))}` })],
     ["explore_workspace", (input) => ({ icon: "⌕", label: `explore: ${oneLine(field(input, "path") ?? ".")}` })],
     ["skill_get", (input) => ({ icon: "◈", label: `skill: ${oneLine(field(input, "name"))}` })],
+    ["memory", (input) => ({ icon: "◈", label: `memory: ${oneLine(field(input, "action"))} ${oneLine(field(input, "scope"))}${field(input, "key") ? ` / ${oneLine(field(input, "key"))}` : ""}` })],
     ["task", (input) => {
         const agent = field(input, "agent");
         const name = typeof agent === "string" && agent ? ` (${agent})` : "";

@@ -1,5 +1,4 @@
-import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
@@ -10,6 +9,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { generateText, LanguageModel } from "ai";
 import { CONTEXT_LIMIT, GLOBAL_DATA_DIR } from "./config";
 import { discoverModels, knownModelInfo, inspectOllamaModel, validateProvider } from "./modelCatalog";
+import { writePrivateFile } from "./paths";
 
 const providerSchema = z.object({
     type: z.enum(["openrouter", "openai", "anthropic", "google", "openai-compatible", "ollama"]),
@@ -90,14 +90,7 @@ export class ModelSettings {
 
     private write(settings: Settings): void {
         const validated = settingsSchema.parse(settings);
-        mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
-        const temporary = `${this.file}.${randomUUID()}.tmp`;
-        try {
-            writeFileSync(temporary, JSON.stringify(validated, null, 2) + "\n", { mode: 0o600, flag: "wx" });
-            renameSync(temporary, this.file);
-        } finally {
-            if (existsSync(temporary)) unlinkSync(temporary);
-        }
+        writePrivateFile(this.file, JSON.stringify(validated, null, 2) + "\n");
     }
 
     keyEnvironment(provider: ProviderConfig): string | undefined {

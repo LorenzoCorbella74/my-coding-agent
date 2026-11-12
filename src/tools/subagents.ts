@@ -12,6 +12,7 @@ import { selectAgentTools, type CustomAgent } from "../agents";
 import { readWorkspaceInstructions } from "../workspaceInstructions";
 import { writeMessage, writeVerbose, writeToolOutput, writeActionPreview, startTextStream } from "../terminalUi";
 import { formatToolActivity } from "../toolActivity";
+import { memoryStore } from "../memory";
 
 const MUTATING_TOOLS = ["shell", "edit_file", "write_file"];
 
@@ -34,6 +35,7 @@ export const runSubagent = async (
         `You are ${agent?.name ?? "a coding subagent"} at ${WORKDIR}. 
         Complete your given task, then summarize your findings.`,
         workspaceInstructions,
+        memoryStore.context(),
         agent?.body ?? "",
         options.system ?? "",
     ].filter(Boolean).join("\n\n");

@@ -19,6 +19,7 @@ import { FlowStore } from "./flowStore";
 import { FLOW_COMMANDS, FlowController, flowChatContext } from "./flow";
 import { runFlowAgent } from "./flowRuntime";
 import { formatToolActivity } from "./toolActivity";
+import { memoryStore } from "./memory";
 
 const formatTokenCount = (count: number): string => String(count).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 
@@ -73,7 +74,7 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
   const generate = (inputMessages: ModelMessage[]) => withSpinner("Thinking", async (spinner) => {
     const result = streamText({
       ...modelRequest,
-      system: `${SYSTEM_PROMPT}\n\n${flowChatContext(flowStore.current())}`,
+      system: `${SYSTEM_PROMPT}\n\n${memoryStore.context()}\n\n${flowChatContext(flowStore.current())}`,
       messages: inputMessages,
       ...(requestController && { abortSignal: requestController.signal }),
       tools: createParentTools(activeSession, spinner, (tools) => {

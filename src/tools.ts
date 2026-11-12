@@ -17,6 +17,7 @@ import type { Session } from "./sessionStore";
 import type { createSpinner } from "./spinner";
 import { AgentLoader, selectDiscussionTools } from "./agents";
 import { webSearch, webExtract } from "./tools/web";
+import { createMemoryTool, memoryStore } from "./memory";
 
 export const MAX_READ_CHARS = 50000;
 export const MAX_BATCH_READ_FILES = 20;
@@ -155,7 +156,9 @@ export const createParentTools = (
     approveTools: (tools: string[]) => void,
     abortSignal?: AbortSignal,
     discussionOnly = false,
-) => discussionOnly ? selectDiscussionTools(TOOLS) : ({
+) => ({
+    memory: createMemoryTool(memoryStore, abortSignal),
+    ...(discussionOnly ? selectDiscussionTools(TOOLS) : {
     ...TOOLS,
     task: tool({
         description:
@@ -167,5 +170,6 @@ export const createParentTools = (
             }),
         ),
         execute: async ({ task, agent }) => runSubagent(task, activeSession, spinner, approveTools, resolveAgent(agent), abortSignal),
+    }),
     }),
 });
