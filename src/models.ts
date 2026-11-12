@@ -40,14 +40,20 @@ const selectionSchema = modelInfoSchema.omit({ id: true, name: true, tools: true
     model: z.string().trim().min(1),
     reasoning: z.string().default("default"),
 });
+const cycleSchema = z.array(selectionSchema.omit({ reasoning: true })).refine(
+    (entries) => new Set(entries.map(({ provider, model }) => JSON.stringify([provider, model]))).size === entries.length,
+    "Duplicate provider/model in modelCycle.",
+);
 const settingsSchema = z.object({
     providers: z.record(z.string().regex(/^[a-z0-9_-]+$/), providerSchema).default({}),
     current: selectionSchema.optional(),
+    modelCycle: cycleSchema.default([]),
 }).passthrough();
 
 export type ProviderConfig = z.infer<typeof providerSchema>;
 export type ModelInfo = z.infer<typeof modelInfoSchema>;
 export type ModelSelection = z.infer<typeof selectionSchema>;
+export type ModelCycleEntry = z.infer<typeof cycleSchema>[number];
 type Settings = z.infer<typeof settingsSchema>;
 type ProviderOptions = NonNullable<Parameters<typeof generateText>[0]["providerOptions"]>;
 
@@ -77,14 +83,14 @@ export class ModelSettings {
         try {
             text = readFileSync(this.file, "utf8");
         } catch (error) {
-            if (error instanceof Error && "code" in error && error.code === "ENOENT") return { providers: {} };
+            if (error instanceof Error && "code" in error && error.code === "ENOENT") return { providers: {}, modelCycle: [] };
             throw error;
         }
         let parsed: unknown;
         try { parsed = JSON.parse(text); }
         catch { throw new Error(`Invalid JSON in ${this.file}. Correct it before continuing.`); }
         const result = settingsSchema.safeParse(parsed);
-        if (!result.success) throw new Error(`Invalid configuration in ${this.file}. Check providers and current model.`);
+        if (!result.success) throw new Error(`Invalid configuration in ${this.file}. Check providers, current model and modelCycle (no duplicate provider/model pairs).`);
         return result.data;
     }
 
@@ -146,6 +152,37 @@ export class ModelSettings {
         return ["CORBECODE_PROVIDER", "MODEL"].filter((key) => this.env[key]?.trim());
     }
 
+    modelCycle(): ModelCycleEntry[] {
+        return this.read().modelCycle;
+    }
+
+    saveModelCycle(entries: ModelCycleEntry[]): void {
+        this.write({ ...this.read(), modelCycle: cycleSchema.parse(entries) });
+    }
+
+    cycleModel(): { changed: boolean; reasoningReset: boolean } {
+        const overrides = this.environmentOverrides();
+        if (overrides.length) throw new Error(`Ciclo modelli bloccato da ${overrides.join(", ")}. Rimuovi gli override d'ambiente.`);
+        const entries = this.modelCycle();
+        if (!entries.length) throw new Error("Nessun modello preferito. Usa /models favorites per aggiungere il modello corrente.");
+        const current = this.current();
+        const index = entries.findIndex((entry) => entry.provider === current?.provider && entry.model === current.model);
+        const next = entries[(index + 1) % entries.length]!;
+        if (next.provider === current?.provider && next.model === current.model) return { changed: false, reasoningReset: false };
+        const provider = this.provider(next.provider);
+        if (!["ollama", "openai-compatible"].includes(provider.type) && !provider.apiKey) {
+            throw new Error(`No API key for ${provider.name}. Use /login.`);
+        }
+        const cached = this.catalogs.get(next.provider)?.find((info) => info.id === next.model);
+        const info: ModelInfo = {
+            contextWindow: 8192,
+            ...knownModelInfo(provider, next.model),
+            ...cached,
+            ...next,
+        };
+        return { changed: true, reasoningReset: this.select(next.provider, info) };
+    }
+
     private selectionDetails(info: ModelInfo): Pick<ModelSelection, "contextWindow" | "control"> {
         return {
             ...(info.contextWindow && { contextWindow: info.contextWindow }),
@@ -161,6 +198,8 @@ export class ModelSettings {
         const previous = settings.current?.reasoning ?? "default";
         const reasoning = parsed.control?.levels.includes(previous) ? previous : "default";
         settings.current = { provider, model: parsed.id, reasoning, ...this.selectionDetails(parsed) };
+        settings.modelCycle = settings.modelCycle.map((entry) => entry.provider === provider && entry.model === parsed.id
+            ? { provider, model: parsed.id, ...this.selectionDetails(parsed) } : entry);
         this.write(settings);
         return previous !== "default" && reasoning === "default";
     }

@@ -7,6 +7,7 @@ import { generateText, isStepCount, streamText, tool } from "ai";
 import { z } from "zod";
 import { ModelSettings, type ModelInfo, type ProviderConfig } from "./models";
 import { discoverModels, inspectOllamaModel, knownModelInfo } from "./modelCatalog";
+import { consumeTextStream } from "./agentStream";
 
 test("persists multiple providers and reasoning atomically, respects overrides, and rejects corrupt settings", () => {
     const root = mkdtempSync(path.join(tmpdir(), "corbecode-models-"));
@@ -40,6 +41,90 @@ test("persists multiple providers and reasoning atomically, respects overrides, 
         assert.throws(() => restored.current(), /Invalid JSON/);
         assert.throws(() => restored.saveProvider("another", { type: "openai", name: "Another" }), /Invalid JSON/);
         assert.equal(readFileSync(file, "utf8"), '{"providers":');
+    } finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("cycles ordered favorites across providers without network, preserving metadata and compatible reasoning", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "corbecode-model-cycle-"));
+    try {
+        const file = path.join(root, "config.json");
+        const noNetwork: typeof fetch = async () => { throw new Error("Cycling must not fetch catalogs"); };
+        const settings = new ModelSettings(file, {}, noNetwork);
+        settings.saveProvider("remote", { type: "openrouter", name: "Remote", apiKey: "test-key" });
+        settings.saveProvider("local", { type: "ollama", name: "Local", baseURL: "http://localhost:11434/v1", contextWindow: 4096 });
+        settings.select("remote", { id: "org/coder", name: "Coder", contextWindow: 128000, control: { kind: "effort", levels: ["low", "high"] } });
+        const { reasoning: _, ...remote } = settings.current()!;
+        settings.saveModelCycle([remote, { provider: "local", model: "coder:8b", contextWindow: 4096, control: { kind: "effort", levels: ["high"] } }]);
+        settings.setReasoning("high");
+        const restored = new ModelSettings(file, {}, noNetwork);
+        assert.deepEqual(restored.cycleModel(), { changed: true, reasoningReset: false });
+        assert.equal(restored.current()?.provider, "local");
+        assert.equal(restored.current()?.reasoning, "high");
+        assert.equal(restored.contextLimit(), 2457);
+        restored.cycleModel();
+        assert.equal(restored.current()?.model, "org/coder");
+        assert.equal(restored.current()?.reasoning, "high");
+        assert.equal(restored.contextLimit(), 50000);
+        restored.select("local", { id: "coder:8b", name: "Coder", contextWindow: 2048 });
+        assert.equal(restored.current()?.reasoning, "default");
+        assert.equal(restored.modelCycle()[1]?.contextWindow, 2048);
+        assert.equal(restored.modelCycle()[1]?.control, undefined);
+        restored.select("remote", { id: "outside-list", name: "Other" });
+        restored.setReasoning("default");
+        restored.cycleModel();
+        assert.equal(restored.current()?.model, "org/coder");
+        restored.setReasoning("high");
+        assert.deepEqual(restored.cycleModel(), { changed: true, reasoningReset: true });
+        restored.saveModelCycle([restored.modelCycle()[1]!]);
+        const before = readFileSync(file, "utf8");
+        assert.deepEqual(restored.cycleModel(), { changed: false, reasoningReset: false });
+        assert.equal(readFileSync(file, "utf8"), before);
+    } finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("rejects empty cycles, duplicates, environment overrides and unusable favorites without changing the selection", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "corbecode-model-cycle-errors-"));
+    try {
+        const file = path.join(root, "config.json");
+        const settings = new ModelSettings(file, {}, async () => Response.json({
+            data: [{ id: "org/cached", supported_parameters: ["tools"], context_length: 32000, reasoning: { supported_efforts: ["high"] } }],
+        }));
+        assert.throws(() => settings.cycleModel(), /Nessun modello preferito/);
+        settings.saveProvider("remote", { type: "openrouter", name: "Remote", apiKey: "test-key" });
+        settings.select("remote", { id: "current", name: "Current" });
+        const favorite = { provider: "remote", model: "org/next" };
+        settings.saveModelCycle([favorite]);
+        const before = readFileSync(file, "utf8");
+        assert.throws(() => settings.saveModelCycle([favorite, favorite]), /Duplicate/);
+        assert.equal(readFileSync(file, "utf8"), before);
+        for (const env of [{ MODEL: "other" }, { CORBECODE_PROVIDER: "openai" }]) {
+            assert.throws(() => new ModelSettings(file, env).cycleModel(), /override/);
+            assert.equal(readFileSync(file, "utf8"), before);
+        }
+        settings.saveModelCycle([{ provider: "openai", model: "gpt-5.2" }]);
+        assert.throws(() => settings.cycleModel(), /API key/);
+        assert.equal(settings.current()?.model, "current");
+        settings.saveModelCycle([{ provider: "missing", model: "model" }]);
+        assert.throws(() => settings.cycleModel(), /Unknown provider/);
+        assert.equal(settings.current()?.model, "current");
+        settings.saveModelCycle([{ provider: "remote", model: "org/manual" }]);
+        settings.cycleModel();
+        assert.equal(settings.current()?.contextWindow, 8192);
+        await settings.list("remote");
+        settings.saveModelCycle([{ provider: "remote", model: "org/cached" }]);
+        settings.cycleModel();
+        assert.equal(settings.current()?.contextWindow, 32000);
+        assert.deepEqual(settings.current()?.control?.levels, ["high"]);
+        settings.saveModelCycle([{ provider: "remote", model: "org/cached", contextWindow: 4096 }]);
+        settings.select("remote", { id: "org/manual", name: "Manual" });
+        settings.cycleModel();
+        assert.equal(settings.current()?.contextWindow, 4096);
+        writeFileSync(file, JSON.stringify({ providers: {}, modelCycle: [favorite, favorite] }));
+        assert.throws(() => settings.modelCycle(), /Invalid configuration.*modelCycle/);
     } finally {
         rmSync(root, { recursive: true, force: true });
     }
@@ -179,6 +264,43 @@ test("sends selected models and reasoning to the actual SDK request format for e
             assert.equal(called, true);
             assert.equal(result.text, "ok");
         }
+    } finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("streams OpenRouter reasoning details before the answer without exposing encrypted metadata", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "corbecode-router-reasoning-"));
+    try {
+        const fetcher: typeof fetch = async () => {
+            const deltas = [
+                { reasoning_details: [{ type: "reasoning.text", text: "Planning" }] },
+                { reasoning_details: [{ type: "reasoning.summary", summary: "Ready" }] },
+                { reasoning_details: [{ type: "reasoning.encrypted", data: "opaque-test-data" }] },
+                { content: "Answer" },
+            ];
+            const events = deltas.map((delta) => ({
+                id: "chat_reasoning", created: 0, model: "test-model",
+                choices: [{ index: 0, delta, finish_reason: null }],
+            }));
+            return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("")
+                + `data: ${JSON.stringify({ id: "chat_reasoning", created: 0, model: "test-model", choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } })}\n\n`
+                + "data: [DONE]\n\n", { headers: { "Content-Type": "text/event-stream" } });
+        };
+        const settings = new ModelSettings(path.join(root, "config.json"), {}, fetcher);
+        settings.saveProvider("remote", { type: "openrouter", name: "Remote", apiKey: "test-key" });
+        settings.select("remote", { id: "test-model", name: "Test" });
+        const result = streamText({ ...settings.request(), prompt: "test", maxRetries: 0 });
+        const events: string[] = [];
+        await consumeTextStream(result.fullStream, {
+            onReasoningStart: () => events.push("reasoning"),
+            onReasoningDelta: (delta) => events.push(delta),
+            onTextStart: () => events.push("answer"),
+            onTextDelta: (delta) => events.push(delta),
+        });
+        assert.deepEqual(events, ["reasoning", "Planning", "Ready", "answer", "Answer"]);
+        assert.equal(await result.text, "Answer");
+        assert.equal((await result.usage).totalTokens, 15);
     } finally {
         rmSync(root, { recursive: true, force: true });
     }

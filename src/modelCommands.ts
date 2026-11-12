@@ -142,6 +142,50 @@ export function createModelCommands(ui: TerminalUi, settings: ModelSettings, upd
         ui.write("Modello salvato. La selezione effettiva nel footer vale dalla prossima richiesta.");
     };
 
+    const next = async (): Promise<void> => {
+        const result = settings.cycleModel();
+        if (result.reasoningReset) ui.write("Il precedente livello di reasoning non e' compatibile: ripristinato Default.");
+        updateFooter();
+        const current = settings.current()!;
+        ui.write(result.changed
+            ? `Modello: ${settings.provider(current.provider).name} / ${current.model}. Dalla prossima richiesta il contesto sara' inviato a questo provider.`
+            : "Il modello corrente e' l'unico preferito.");
+    };
+
+    const favorites = async (): Promise<void> => {
+        while (true) {
+            const entries = settings.modelCycle();
+            const action = await ui.select(`Modelli preferiti (${entries.length}, ordine di Alt+M)`, [
+                { value: "add", label: "Aggiungi o aggiorna il modello corrente" },
+                ...entries.map((entry, index) => ({ value: String(index), label: `${index + 1}. ${entry.provider} / ${entry.model}` })),
+            ]);
+            if (action === undefined) return;
+            if (action === "add") {
+                const current = settings.current();
+                if (!current) throw new Error("Seleziona prima un modello con /models.");
+                const { reasoning: _, ...entry } = current;
+                const index = entries.findIndex((item) => item.provider === entry.provider && item.model === entry.model);
+                if (index < 0) entries.push(entry);
+                else entries[index] = entry;
+                settings.saveModelCycle(entries);
+                ui.write(`Preferito salvato: ${entry.provider} / ${entry.model}.`);
+                continue;
+            }
+            const index = Number(action);
+            const entry = entries[index]!;
+            const edit = await ui.select(`${entry.provider} / ${entry.model}`, [
+                { value: "remove", label: "Rimuovi dai preferiti" },
+                ...(index > 0 ? [{ value: "up", label: "Sposta prima" }] : []),
+                ...(index < entries.length - 1 ? [{ value: "down", label: "Sposta dopo" }] : []),
+            ]);
+            if (edit === undefined) continue;
+            entries.splice(index, 1);
+            if (edit !== "remove") entries.splice(index + (edit === "up" ? -1 : 1), 0, entry);
+            settings.saveModelCycle(entries);
+            ui.write(edit === "remove" ? "Preferito rimosso; modello corrente invariato." : "Ordine dei preferiti salvato.");
+        }
+    };
+
     const reasoning = async (): Promise<void> => {
         const current = settings.current();
         if (!current) { ui.write("Seleziona prima un modello con /models."); return; }
@@ -159,5 +203,5 @@ export function createModelCommands(ui: TerminalUi, settings: ModelSettings, upd
         updateFooter();
     };
 
-    return { login, models, reasoning };
+    return { login, models, reasoning, next, favorites };
 }

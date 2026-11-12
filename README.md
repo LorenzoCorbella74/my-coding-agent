@@ -59,6 +59,35 @@ I modelli senza tool calling dichiarato vengono esclusi o rifiutati alla selezio
 
 Il reasoning usa i metadati disponibili e una piccola mappa di modelli documentati per i provider che non espongono i livelli. I modelli sconosciuti mantengono i default del provider (`N/A` nel footer). Le opzioni possono essere livelli, on/off oppure budget espliciti in token, secondo provider, modello e versione del server. Cambiando modello, una scelta non compatibile torna a `Default` con avviso. `Alt+R` non cambia impostazioni durante generazioni o approvazioni.
 
+Quando il provider espone reasoning testuale o riassunti nello stream, la UI li mostra nell'ordine di arrivo sotto una label distinta, prima della risposta quando arrivano prima del testo. Vale anche per i subagent; non vengono ristampati a fine step ne' mostrati metadati cifrati o firme.
+
+Il footer mostra a destra in giallo `Input`, `Output` e `Total` dell'ultimo turno di chat completato, senza aggiungere una riga Usage alla conversazione. Include gli step del modello principale e le continuazioni dopo le approvazioni, non il consumo separato di subagent o compressione. Non e' un cumulativo della sessione: al riavvio, alla creazione o al ripristino di una sessione il contatore e' vuoto fino al prossimo turno completato. La stima del contesto "Tokens usati finora" resta distinta dal consumo riportato dal provider. Il footer rimane su una riga, dando priorita' ai conteggi e troncando i contenuti se lo spazio non basta.
+
+### Modelli preferiti e cambio rapido
+
+Seleziona un modello con `/models`, poi usa `/models favorites` per aggiungerlo alla lista globale ordinata. Ripeti per gli altri modelli: il menu permette anche di rimuovere le voci o spostarle prima/dopo. Aggiungere nuovamente la stessa coppia provider/modello ne aggiorna i metadati senza duplicarla; rimuovere un preferito non cambia il modello corrente. `Esc` chiude il menu o torna dalla modifica alla lista; le operazioni gia' confermate sono salvate.
+
+Al prompt della chat, `Alt+M` passa al prossimo preferito senza perdere il testo in composizione. `/models next` offre la stessa funzione quando il terminale intercetta lo shortcut. Dopo l'ultimo si torna al primo; se il modello corrente non e' nella lista si parte dal primo. Una lista vuota produce un avviso, una sola voce gia' attiva non cambia nulla.
+
+La lista e' conservata nel campo `modelCycle` del `config.json` globale, insieme alle impostazioni esistenti. Puoi anche modificarla a mano:
+
+```json
+{
+  "modelCycle": [
+    { "provider": "openrouter", "model": "anthropic/claude-sonnet-4.5" },
+    { "provider": "ollama", "model": "qwen3:8b" }
+  ]
+}
+```
+
+Il frammento mostra solo il nuovo campo: non sostituire l'intero file perdendo provider e credenziali. Gli ID sono esempi e devono essere disponibili sul server. `provider` e' l'ID della connessione configurata, non necessariamente il tipo o il nome visualizzato; piu' endpoint dello stesso tipo restano distinti. Gli ID dei modelli possono contenere `/`. Le coppie duplicate sono rifiutate.
+
+Le voci aggiunte dal menu conservano anche `contextWindow` e `control`, quando noti, ma non un reasoning dedicato. Il cambio riutilizza cataloghi in memoria e metadati salvati, senza richieste di rete. Per aggiornare i dati, usa `/models refresh` e riseleziona il modello; i preferiti corrispondenti vengono aggiornati. Per voci manuali senza metadati si usano le informazioni note del provider/modello o un contesto prudenziale di 8192 token, ulteriormente limitato dall'eventuale configurazione del server. Il reasoning precedente viene mantenuto solo se supportato, altrimenti torna a `Default` con avviso.
+
+Il footer e la selezione globale persistente vengono aggiornati immediatamente; il nuovo modello vale dalla prossima richiesta, anche per subagent, workflow e compressione. Lo shortcut e' disabilitato durante generazioni, approvazioni e selettori. `MODEL` o `CORBECODE_PROVIDER` bloccano il ciclo con un messaggio esplicito: rimuovili per usare i preferiti.
+
+Cambiare provider significa inviare il contesto della conversazione al nuovo destinatario dalla richiesta successiva; il cambio viene annunciato e non invia richieste da solo. Un contesto piu' piccolo puo' richiedere compressione. Credenziali mancanti o provider sconosciuti impediscono il cambio senza modificare la selezione corrente; raggiungibilita', accesso al modello e compatibilita' effettiva si verificano alla richiesta, senza fallback automatico ad altri provider. Se avvii piu' CLI, condividono la selezione globale; i salvataggi sono atomici ma non coordinano scritture concorrenti tra processi.
+
 ### Memoria di lungo periodo
 
 Il tool `memory` gestisce preferenze e note durevoli come chiave-valore in Markdown, con scope obbligatorio:
@@ -115,12 +144,12 @@ corbecode --version
 **Chat**
 
 - `/login`: configura o aggiorna le credenziali di un provider.
-- `/models [refresh]`: seleziona provider e modello; `refresh` aggiorna i cataloghi.
+- `/models [refresh|next|favorites]`: seleziona provider e modello; `refresh` aggiorna i cataloghi, `next` passa al prossimo preferito, `favorites` gestisce la lista ordinata globale.
 - `/new`, `/sessions`, `/restore <id>`: crea, seleziona o ripristina una sessione.
 - `/compress`: comprime la cronologia attiva.
 - `/skills`: elenca le skill; `/verbose`: mostra o nasconde i dettagli dei tool.
 - `/quit` o `/exit`: chiude la CLI.
-- `Enter` invia, `Alt+Enter` inserisce una riga, `Alt+R` seleziona il reasoning al prompt della chat, `Ctrl+C` interrompe la richiesta corrente.
+- `Enter` invia, `Alt+Enter` inserisce una riga, `Alt+M` passa al prossimo modello preferito e `Alt+R` seleziona il reasoning al prompt della chat, `Ctrl+C` interrompe la richiesta corrente.
 
 **Workflow**
 

@@ -52,17 +52,6 @@ export const runSubagent = async (
                 edit_file: () => activeSession.approvedTools.includes("edit_file") ? "approved" : "user-approval",
                 write_file: () => activeSession.approvedTools.includes("write_file") ? "approved" : "user-approval",
             },
-            onStepFinish: ({ providerMetadata }) => {
-                const reasoningDetails = providerMetadata?.openrouter?.reasoning_details;
-                if (Array.isArray(reasoningDetails) && reasoningDetails.length > 0) {
-                    spinner.stop();
-                    for (const detail of reasoningDetails) {
-                        writeMessage(`${chalk.bold.cyan(`${label} reasoning details:`)} ${chalk.gray(detail.text ?? detail.summary ?? JSON.stringify(detail))}`);
-                        writeMessage();
-                    }
-                    spinner.start(`${label} thinking...`);
-                }
-            },
             onToolExecutionStart: ({ toolCall }) => {
                 spinner.stop();
                 writeVerbose(lavender(`${label} tool started: ${toolCall.toolName} (${toolCall.toolCallId})`));
@@ -82,7 +71,14 @@ export const runSubagent = async (
         });
 
         let appendDelta: (delta: string) => void = () => undefined;
+        let appendReasoning: (delta: string) => void = () => undefined;
         await consumeTextStream(result.fullStream, {
+            onReasoningStart: () => {
+                spinner.stop();
+                appendReasoning = startTextStream(chalk.gray(`  ↳ ${label} reasoning`));
+            },
+            onReasoningDelta: (delta) => appendReasoning(delta),
+            onReasoningEnd: () => spinner.start(`${label} thinking...`),
             onTextStart: () => {
                 spinner.stop();
                 appendDelta = startTextStream(chalk.gray(`  ↳ ${label}`));

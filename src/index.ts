@@ -6,7 +6,7 @@ import { consumeTextStream } from "./agentStream";
 import { microCompact, estimateTokens, autoCompact } from "./compact";
 import type { ModelMessage } from "ai";
 import packageJson from "../package.json" with { type: "json" };
-import { createParentTools, TOOLS } from "./tools";
+import { createParentTools } from "./tools";
 import { askTerminal, closeTerminalInput, getApprovalDecision } from "./terminalInput";
 import { GLOBAL_DATA_DIR, WORKDIR } from "./config";
 import { modelSettings } from "./models";
@@ -53,6 +53,7 @@ let activeSession = sessionStore.resumeOrCreate();
 let history = activeSession.messages;
 const MUTATING_TOOLS = ["shell", "edit_file", "write_file"];
 let requestController: AbortController | undefined;
+let lastTurnUsage = "";
 
 /** AGENT LOOP */
 const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
@@ -86,17 +87,6 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
         write_file: () => activeSession.approvedTools.includes("write_file") ? "approved" : "user-approval",
       },
       stopWhen: isLoopFinished(),
-      onStepFinish: ({ providerMetadata }) => {
-        const reasoningDetails = providerMetadata?.openrouter?.reasoning_details;
-        if (Array.isArray(reasoningDetails) && reasoningDetails.length > 0) {
-          spinner.stop();
-          for (const detail of reasoningDetails) {
-            writeMessage(`${chalk.bold.cyan("Reasoning details:")} ${chalk.gray(detail.text ?? detail.summary ?? JSON.stringify(detail))}`);
-            writeMessage();
-          }
-          spinner.start("Thinking...");
-        }
-      },
       onToolExecutionStart: ({ toolCall }) => {
         spinner.stop();
         writeVerbose(lavender(`Tool started: ${toolCall.toolName} (${toolCall.toolCallId})`));
@@ -116,7 +106,14 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
     });
 
     let appendDelta: (delta: string) => void = () => undefined;
+    let appendReasoning: (delta: string) => void = () => undefined;
     await consumeTextStream(result.fullStream, {
+      onReasoningStart: () => {
+        spinner.stop();
+        appendReasoning = startTextStream(chalk.gray("Reasoning"));
+      },
+      onReasoningDelta: (delta) => appendReasoning(delta),
+      onReasoningEnd: () => spinner.start("Thinking"),
       onTextStart: () => {
         spinner.stop();
         appendDelta = startTextStream("CORBE CODE", true);
@@ -172,7 +169,8 @@ const agentLoop = async (messages: ModelMessage[]): Promise<string> => {
     result = await generate(workingMessages);
   }
 
-  writeMessage(orange(`${chalk.bold("Usage:")} ${chalk.bold("Input:")} ${formatTokenCount(inputTokens)} - ${chalk.bold("Output:")} ${formatTokenCount(outputTokens)} - ${chalk.bold("Total:")} ${formatTokenCount(totalTokens)}`));
+  lastTurnUsage = `Input: ${formatTokenCount(inputTokens)} | Output: ${formatTokenCount(outputTokens)} | Total: ${formatTokenCount(totalTokens)}`;
+  updateFooter();
   return result.text;
 };
 
@@ -198,7 +196,9 @@ const configureModel = async (run: (signal: AbortSignal) => Promise<void>): Prom
 const slashCommands: Record<string, SlashCommandHandler> = {
   "/login": async () => configureModel((signal) => modelCommands.login(signal)),
   "/models": async (args) => {
-    if (args && args !== "refresh") throw new Error("Usage: /models [refresh]");
+    if (args === "next") return configureModel(() => modelCommands.next());
+    if (args === "favorites") return configureModel(() => modelCommands.favorites());
+    if (args && args !== "refresh") throw new Error("Usage: /models [refresh|next|favorites]");
     return configureModel((signal) => modelCommands.models(args === "refresh", signal));
   },
   "/verbose": async () => {
@@ -211,6 +211,7 @@ const slashCommands: Record<string, SlashCommandHandler> = {
   "/new": async () => {
     activeSession = sessionStore.create();
     history = activeSession.messages;
+    lastTurnUsage = "";
     updateFooter();
     writeMessage(chalk.cyan(`Started session ${activeSession.id.slice(0, 8)}.`));
     return false;
@@ -229,6 +230,7 @@ const slashCommands: Record<string, SlashCommandHandler> = {
     if (selected) {
       activeSession = sessionStore.restore(selected);
       history = activeSession.messages;
+      lastTurnUsage = "";
       updateFooter();
       writeMessage(chalk.cyan(`Restored session ${activeSession.id.slice(0, 8)}.`));
     }
@@ -246,6 +248,7 @@ const slashCommands: Record<string, SlashCommandHandler> = {
     try {
       activeSession = sessionStore.restore(idPrefix);
       history = activeSession.messages;
+      lastTurnUsage = "";
       updateFooter();
       writeMessage(chalk.cyan(`Restored session ${activeSession.id.slice(0, 8)}.`));
     } catch (error) {
@@ -383,7 +386,7 @@ const ui = startTerminalUi(WORKDIR, Object.keys(slashCommands).map((command) => 
     "/compress": "Compress the conversation", "/quit": "Quit", "/exit": "Quit",
     "/skills": "List available skills",
     "/verbose": "Toggle tool execution details",
-    "/login": "Configure provider credentials", "/models": "Select provider and model; refresh reloads catalogs",
+    "/login": "Configure provider credentials", "/models": "Select model; refresh catalogs; next/favorites for quick cycling",
   }[command] ?? FLOW_COMMANDS[command] ?? "",
 })));
 ui.onInterrupt = () => requestController?.abort();
@@ -393,16 +396,19 @@ ui.writeHeader([
   "| |  | | | | |_) |  _ \\|  _|   | |  | | | | | | |  _|",
   "| |__| |_| |  _ <| |_) | |___  | |__| |_| | |_| | |___",
   " \\____\\___/|_| \\_\\____/|_____|  \\____\\___/|____/|_____|",
-].join("\n"), "Enter: invia | Alt+Enter: nuova riga | Alt+R: reasoning | /: comandi | @: file | PgUp/PgDn: cronologia | Ctrl+C: annulla/esci");
+].join("\n"), "Enter: invia | Alt+Enter: nuova riga | Alt+M: modello | Alt+R: reasoning | /: comandi | @: file | PgUp/PgDn: cronologia | Ctrl+C: annulla/esci");
 const updateFooter = () => {
   const flow = flowStore.current();
   const current = modelSettings.current();
   const model = current ? `${modelSettings.provider(current.provider).name} / ${current.model} | Reasoning: ${current.control ? current.reasoning : "N/A"}` : "nessuno (/login, /models)";
-  ui.setFooter(`Version ${packageJson.version} | Model: ${model} | Session ${activeSession.id.slice(0, 8)}${flow ? ` | Flow ${flow.id.slice(0, 8)} ${flow.phase}` : ""}`);
+  ui.setFooter(`Version ${packageJson.version} | Model: ${model} | Session ${activeSession.id.slice(0, 8)}${flow ? ` | Flow ${flow.id.slice(0, 8)} ${flow.phase}` : ""}`, lastTurnUsage);
 };
 const modelCommands = createModelCommands(ui, modelSettings, updateFooter);
 ui.onReasoning = () => {
   void modelCommands.reasoning().catch((error: unknown) => writeMessage(chalk.red(error instanceof Error ? error.message : String(error))));
+};
+ui.onNextModel = () => {
+  void modelCommands.next().catch((error: unknown) => writeMessage(chalk.red(error instanceof Error ? error.message : String(error))));
 };
 updateFooter();
 if (!startupModel) writeMessage("Configura un provider con /login, poi scegli il modello con /models.");

@@ -133,6 +133,43 @@ test("spaces the header and separates hints from conversation messages", () => {
     }
 });
 
+test("keeps last-turn usage right-aligned in a single footer row when resizing", () => {
+    const terminal = new TestTerminal();
+    const ui = new TerminalUi(tmpdir(), [], terminal);
+    try {
+        ui.start();
+        const usage = "Input: 2.801 | Output: 299 | Total: 3.100";
+        ui.setFooter("Version 0.0.2 | Model: a-very-long-provider/model | Session abc", usage);
+        ui.tui.renderNow();
+        let frame = ui.tui.getScreenLines().map(stripTerminalSequences);
+        assert.ok(frame.at(-1)?.trimEnd().endsWith(usage));
+        assert.equal(visibleWidth(frame.at(-1)!.trimEnd()), terminal.width - 1);
+        assert.ok(frame.at(-1)?.startsWith(" Version"));
+        assert.equal(frame.length, terminal.height);
+        assert.equal(ui.transcript.render(80).length, 0);
+        terminal.width = 45;
+        terminal.height = 12;
+        terminal.resize?.();
+        ui.tui.renderNow();
+        frame = ui.tui.getScreenLines().map(stripTerminalSequences);
+        assert.ok(frame.at(-1)?.trimEnd().endsWith(usage));
+        assert.equal(visibleWidth(frame.at(-1)!.trimEnd()), terminal.width - 1);
+        assert.equal(frame.length, terminal.height);
+        assert.ok(frame.every((line) => visibleWidth(line) <= 45));
+        terminal.width = 16;
+        terminal.resize?.();
+        ui.tui.renderNow();
+        frame = ui.tui.getScreenLines().map(stripTerminalSequences);
+        assert.equal(frame.length, terminal.height);
+        assert.ok(frame.every((line) => visibleWidth(line) <= 16));
+        ui.setFooter("Session xyz");
+        ui.tui.renderNow();
+        assert.doesNotMatch(ui.tui.getScreenLines().map(stripTerminalSequences).join("\n"), /Input:/);
+    } finally {
+        ui.close();
+    }
+});
+
 test("completes slash commands and @ paths including directories and spaces", async () => {
     const workspace = mkdtempSync(path.join(tmpdir(), "corbecode-tui-files-"));
     try {
@@ -352,6 +389,107 @@ test("searches models by substring and Alt+R changes reasoning only at the chat 
         terminal.input?.("n");
         terminal.input?.("\r");
         assert.equal(await approval, "n");
+    } finally {
+        ui.close();
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("Alt+M cycles favorites only at the chat prompt, preserving the draft and showing the next provider", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "corbecode-model-cycle-ui-"));
+    const terminal = new TestTerminal();
+    const ui = new TerminalUi(root, [], terminal);
+    try {
+        const settings = new ModelSettings(path.join(root, "config.json"), {}, async () => { throw new Error("No network during cycling"); });
+        settings.saveProvider("local", { type: "ollama", name: "Local", baseURL: "http://localhost:11434/v1" });
+        settings.saveProvider("remote", { type: "openrouter", name: "Remote", apiKey: "test-key" });
+        settings.select("local", { id: "coding", name: "Coding" });
+        settings.saveModelCycle([{ provider: "local", model: "coding" }, { provider: "remote", model: "org/coder" }]);
+        const commands = createModelCommands(ui, settings, () => ui.setFooter(`Model: ${settings.current()?.provider} / ${settings.current()?.model}`));
+        let changed: Promise<void> | undefined;
+        ui.onNextModel = () => { changed = commands.next(); };
+        ui.start();
+        terminal.input?.("\x1bm");
+        assert.equal(changed, undefined);
+        const chat = ui.ask("YOU >");
+        terminal.input?.("unfinished draft");
+        terminal.input?.("\x1bm");
+        assert.ok(changed);
+        await changed;
+        assert.equal(settings.current()?.provider, "remote");
+        assert.equal(ui.editor.getText(), "unfinished draft");
+        ui.tui.renderNow();
+        assert.match(ui.tui.getScreenLines().map(stripTerminalSequences).join("\n"), /Model: remote \/ org\/coder/);
+        assert.match(ui.transcript.render(80).map(stripTerminalSequences).join("\n"), /contesto sara'\s+inviato/);
+        changed = undefined;
+        const selection = ui.select("Selection", [{ value: "yes", label: "Yes" }]);
+        terminal.input?.("\x1bm");
+        assert.equal(changed, undefined);
+        terminal.input?.("\x1b");
+        await selection;
+        assert.equal(ui.editor.getText(), "unfinished draft");
+        terminal.input?.("\r");
+        assert.equal(await chat, "unfinished draft");
+        terminal.input?.("\x1bm");
+        assert.equal(changed, undefined);
+        const approval = ui.ask("Execute? [s/N]");
+        terminal.input?.("\x1bm");
+        assert.equal(changed, undefined);
+        terminal.input?.("n");
+        terminal.input?.("\r");
+        await approval;
+        await commands.next();
+        assert.equal(new ModelSettings(settings.file, {}).current()?.provider, "local");
+    } finally {
+        ui.close();
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("manages persistent favorites through the terminal menu without duplicates or changing the active model", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "corbecode-favorites-ui-"));
+    const terminal = new TestTerminal();
+    const ui = new TerminalUi(root, [], terminal);
+    try {
+        const settings = new ModelSettings(path.join(root, "config.json"), {});
+        settings.saveProvider("local", { type: "ollama", name: "Local", baseURL: "http://localhost:11434/v1" });
+        settings.select("local", { id: "c", name: "C", contextWindow: 2048 });
+        settings.saveModelCycle([{ provider: "local", model: "a" }, { provider: "local", model: "b" }]);
+        const commands = createModelCommands(ui, settings, () => { });
+        const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
+        const choose = async (down: number) => {
+            for (let index = 0; index < down; index++) terminal.input?.("\x1b[B");
+            terminal.input?.("\r");
+            await tick();
+        };
+        ui.start();
+        let menu = commands.favorites();
+        await choose(0);
+        assert.deepEqual(settings.modelCycle().map((entry) => entry.model), ["a", "b", "c"]);
+        assert.equal(settings.modelCycle()[2]?.contextWindow, 2048);
+        await choose(0);
+        assert.equal(settings.modelCycle().length, 3);
+        await choose(3);
+        await choose(1);
+        assert.deepEqual(settings.modelCycle().map((entry) => entry.model), ["a", "c", "b"]);
+        await choose(2);
+        await choose(2);
+        assert.deepEqual(settings.modelCycle().map((entry) => entry.model), ["a", "b", "c"]);
+        await choose(1);
+        await choose(0);
+        assert.deepEqual(settings.modelCycle().map((entry) => entry.model), ["b", "c"]);
+        assert.equal(settings.current()?.model, "c");
+        terminal.input?.("\x1b");
+        await menu;
+        assert.deepEqual(new ModelSettings(settings.file, {}).modelCycle(), settings.modelCycle());
+        const before = settings.modelCycle();
+        menu = commands.favorites();
+        await choose(1);
+        terminal.input?.("\x1b");
+        await tick();
+        terminal.input?.("\x1b");
+        await menu;
+        assert.deepEqual(settings.modelCycle(), before);
     } finally {
         ui.close();
         rmSync(root, { recursive: true, force: true });

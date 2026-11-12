@@ -5,10 +5,10 @@ import { getActionPreview } from "./actionPreview";
 import { readdir } from "node:fs/promises";
 import path from "node:path";
 import {
-    CombinedAutocompleteProvider, Container, CURSOR_MARKER, Editor, Input, Loader, Markdown, matchesKey,
+    CombinedAutocompleteProvider, Container, CURSOR_MARKER, Editor, HStack, Input, Loader, Markdown, matchesKey,
     ProcessTerminal, ScrollView, SelectList, Spacer, Text, TuiAltScreen, VStack,
     stripTerminalSequences,
-    truncateToWidth,
+    truncateToWidth, TruncatedText, visibleWidth,
     type AutocompleteProvider, type Component, type MarkdownTheme, type SlashCommand, type Terminal, type SelectItem,
 } from "@earendil-works/pi-tui";
 
@@ -91,7 +91,7 @@ export class TerminalUi {
     private readonly prompt = new Text("YOU >");
     private readonly status = new Container();
     private readonly selection = new Container();
-    private readonly footer = new Text("", 1, 0);
+    private readonly footer = new HStack();
     private readonly autocomplete: AutocompleteProvider;
     private readonly requests: {
         prompt: string; resolve: (answer: string) => void; reject: (error: Error) => void;
@@ -101,6 +101,7 @@ export class TerminalUi {
     private cancelSelection: (() => void) | undefined;
     onInterrupt: (() => void) | undefined;
     onReasoning: (() => void) | undefined;
+    onNextModel: (() => void) | undefined;
 
     constructor(workspace: string, commands: SlashCommand[], terminal: Terminal = new ProcessTerminal()) {
         this.tui = new TuiAltScreen(terminal);
@@ -138,8 +139,9 @@ export class TerminalUi {
             this.activatePrompt();
         };
         this.tui.addInputListener((data) => {
-            if (matchesKey(data, "alt+r") && this.editor.showUserPrefix && !this.editor.disableSubmit && !this.cancelSelection) {
-                this.onReasoning?.();
+            if ((matchesKey(data, "alt+r") || matchesKey(data, "alt+m")) && this.editor.showUserPrefix && !this.editor.disableSubmit && !this.cancelSelection) {
+                if (matchesKey(data, "alt+r")) this.onReasoning?.();
+                else this.onNextModel?.();
                 return { consume: true };
             }
             if (!matchesKey(data, "ctrl+c")) return undefined;
@@ -299,8 +301,10 @@ export class TerminalUi {
         this.tui.requestRender();
     }
 
-    setFooter(text: string): void {
-        this.footer.setText(chalk.gray(text));
+    setFooter(text: string, rightText = ""): void {
+        this.footer.clear();
+        if (text.trim() || rightText) this.footer.addChild(new TruncatedText(chalk.gray(text), 1, 0), { basis: 0, grow: 1, shrink: 0, minSize: 0 });
+        if (rightText) this.footer.addChild(new TruncatedText(chalk.yellow(rightText), 1, 0), { basis: visibleWidth(rightText) + 2, minSize: 0 });
         this.tui.requestRender();
     }
 
