@@ -10,6 +10,8 @@ test("describes each tool action with an icon and a readable label", () => {
     assert.equal(formatToolActivity("shell", { command: "npm test" }), "❯ bash: npm test");
     assert.equal(formatToolActivity("explore_workspace", {}), "⌕ explore: .");
     assert.equal(formatToolActivity("skill_get", { name: "pdf" }), "◈ skill: pdf");
+    assert.equal(formatToolActivity("memory", { action: "set", scope: "project", key: "coding.style", value: "Minimal" }), "◈ memory: set project / coding.style");
+    assert.equal(formatToolActivity("memory", { action: "list", scope: "global" }), "◈ memory: list global");
     assert.equal(formatToolActivity("task", { task: "find routes", agent: "explore" }), "◎ subagent (explore): find routes");
     assert.equal(formatToolActivity("task", { task: "summarize" }), "◎ subagent: summarize");
 });

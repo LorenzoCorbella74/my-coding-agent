@@ -27,6 +27,7 @@ Only delete a memory key when the user requests it. Report successful changes an
 export class MemoryStore {
     private readonly files: Record<MemoryScope, string>;
     private readonly workspace: string;
+    private readonly projectAvailable: boolean;
 
     constructor(workspace: string, globalDirectory: string) {
         this.workspace = path.resolve(workspace);
@@ -34,11 +35,12 @@ export class MemoryStore {
             global: path.join(path.resolve(globalDirectory), "memory.md"),
             project: path.join(this.workspace, ".corbecode", "memory.md"),
         };
+        this.projectAvailable = path.relative(this.files.global, this.files.project) !== "";
     }
 
     private file(scope: MemoryScope): string {
         scopeSchema.parse(scope);
-        if (scope === "project" && path.relative(this.files.global, this.files.project) === "") {
+        if (scope === "project" && !this.projectAvailable) {
             throw new Error("Global and project memory paths overlap. Choose a different workspace.");
         }
         const file = this.files[scope];
@@ -93,9 +95,8 @@ export class MemoryStore {
             if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
         }
         const rules = ["/memory.md", "/memory.md.*.tmp"];
-        const lines = new Set(existing.split(/\r?\n/).map((line) => line.trim()));
-        const missing = rules.filter((rule) => !lines.has(rule));
-        if (missing.length) writePrivateFile(file, `${existing}${existing && !existing.endsWith("\n") ? "\n" : ""}${missing.join("\n")}\n`);
+        const suffix = rules.join("\n") + "\n";
+        if (!existing.endsWith(suffix)) writePrivateFile(file, `${existing}${existing && !existing.endsWith("\n") ? "\n" : ""}${suffix}`);
     }
 
     private write(scope: MemoryScope, entries: Record<string, string>): void {
@@ -124,12 +125,13 @@ export class MemoryStore {
 
     context(): string {
         const global = this.list("global");
-        const project = this.list("project");
+        const project = this.projectAvailable ? this.list("project") : {};
         const effective = Object.fromEntries([
             ...Object.entries(global).map(([key, value]) => [key, { scope: "global", value }]),
             ...Object.entries(project).map(([key, value]) => [key, { scope: "project", value }]),
         ]);
-        return `${MEMORY_GUIDANCE}\nEffective stored preferences (JSON data):\n${JSON.stringify(effective)}`;
+        const availability = this.projectAvailable ? "" : "\nProject memory is unavailable: its path overlaps global memory. Only global preferences are loaded; choose another workspace for project memory.";
+        return `${MEMORY_GUIDANCE}${availability}\nEffective stored preferences (JSON data):\n${JSON.stringify(effective)}`;
     }
 }
 

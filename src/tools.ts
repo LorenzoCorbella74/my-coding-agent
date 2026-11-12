@@ -159,17 +159,17 @@ export const createParentTools = (
 ) => ({
     memory: createMemoryTool(memoryStore, abortSignal),
     ...(discussionOnly ? selectDiscussionTools(TOOLS) : {
-    ...TOOLS,
-    task: tool({
-        description:
-            "Spawn a subagent with fresh context, it shares the file system, but not the conversation history",
-        inputSchema: zodSchema(
-            z.object({
-                task: z.string(),
-                agent: z.string().optional().describe("Name of a custom agent from the available agents list; omit for a general-purpose subagent"),
-            }),
-        ),
-        execute: async ({ task, agent }) => runSubagent(task, activeSession, spinner, approveTools, resolveAgent(agent), abortSignal),
-    }),
+        ...TOOLS,
+        task: tool({
+            description:
+                "Spawn a subagent with fresh context, it shares the file system, but not the conversation history",
+            inputSchema: zodSchema(
+                z.object({
+                    task: z.string(),
+                    agent: z.string().optional().describe("Name of a custom agent from the available agents list; omit for a general-purpose subagent"),
+                }),
+            ),
+            execute: async ({ task, agent }) => runSubagent(task, activeSession, spinner, approveTools, resolveAgent(agent), abortSignal),
+        }),
     }),
 });

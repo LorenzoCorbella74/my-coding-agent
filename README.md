@@ -59,9 +59,42 @@ I modelli senza tool calling dichiarato vengono esclusi o rifiutati alla selezio
 
 Il reasoning usa i metadati disponibili e una piccola mappa di modelli documentati per i provider che non espongono i livelli. I modelli sconosciuti mantengono i default del provider (`N/A` nel footer). Le opzioni possono essere livelli, on/off oppure budget espliciti in token, secondo provider, modello e versione del server. Cambiando modello, una scelta non compatibile torna a `Default` con avviso. `Alt+R` non cambia impostazioni durante generazioni o approvazioni.
 
+### Memoria di lungo periodo
+
+Il tool `memory` gestisce preferenze e note durevoli come chiave-valore in Markdown, con scope obbligatorio:
+
+- `global`: `memory.md` nella directory globale dell'app, per preferenze valide in tutti i progetti.
+- `project`: `.corbecode/memory.md` nel workspace, per preferenze specifiche del progetto.
+
+Puoi chiedere, ad esempio, "Ricorda globalmente che preferisco risposte in italiano", "Per questo progetto ricorda di usare npm", "Mostra la memoria globale" oppure "Dimentica la preferenza di progetto tooling.package-manager". Non servono nuovi slash command: l'agente usa le operazioni `set`, `list` e `delete`.
+
+L'agente principale puo' salvare autonomamente preferenze esplicite e durevoli quando lo scope e' chiaro; deve chiedere se e' ambiguo. Non deve dedurre preferenze da comportamenti, file o risultati dei tool, ne' salvare credenziali, segreti, dati personali/sensibili o stato temporaneo dei task. Le cancellazioni richiedono una richiesta dell'utente. Queste regole guidano l'agente: non sono un classificatore automatico dei contenuti.
+
+Il formato e' modificabile a mano, con una voce per riga:
+
+```markdown
+# User memory
+
+- response.language: italiano
+- coding.style: modifiche minime e riuso delle soluzioni esistenti
+```
+
+Le chiavi usano lettere minuscole, numeri, punti, trattini o underscore, iniziano con una lettera e hanno al massimo 100 caratteri. I valori sono testo su una sola riga, fino a 1000 caratteri; ogni file ha un limite di 16 KiB per contenere il contesto. Un `set` sulla stessa chiave sostituisce il valore, senza duplicati. File malformati, chiavi duplicate e limiti superati producono un errore, senza sovrascritture o troncamenti silenziosi.
+
+Le due memorie sono rilette nelle nuove richieste della chat e dei subagent; a parita' di chiave prevale il progetto. Restano separate dalla cronologia e quindi sopravvivono a nuove sessioni e compressioni. Sono preferenze, non autorizzazioni: richieste esplicite e istruzioni del repository prevalgono. Le regole condivise dai collaboratori rimangono in `AGENTS.md`.
+
+Il tool e' disponibile solo all'agente principale, anche durante una discussione di workflow. I subagent ricevono il contesto e l'istruzione di non modificare i file di memoria nemmeno attraverso altri tool. I comandi shell non sono una sandbox e restano soggetti alle normali approvazioni.
+
+La memoria di progetto e i suoi file temporanei vengono esclusi da Git tramite `.corbecode/.gitignore`, preservando le regole esistenti. Se il file e' gia' tracciato, l'agente rifiuta di modificarlo: rimuovilo dall'indice con `git rm --cached -- .corbecode/memory.md` prima di continuare. Non usare `git add -f` per la memoria privata. I collegamenti simbolici sui file o sulle directory di memoria sono rifiutati per evitare accessi fuori scope.
+
+Se i percorsi globale e di progetto coincidono (per esempio avviando dalla home su Windows), la memoria globale rimane disponibile; il contesto segnala che lo scope di progetto non e' disponibile e le relative operazioni restituiscono un errore, senza mescolare i dati.
+
+I salvataggi sono atomici e usano gli stessi permessi privati della configurazione. Il Markdown e' in chiaro; non condividerlo. Gli aggiornamenti sono serializzati nel singolo processo, non tra piu' istanze dell'app in scrittura contemporanea.
+
 ## Funzionalità
 
 - Chat in streaming con cronologia persistente e ripresa delle sessioni.
+- Memoria globale e di progetto per preferenze esplicite e durevoli, tramite il tool `memory`.
 - Esplorazione, ricerca e lettura dei file; modifiche e comandi shell richiedono approvazione.
 - Ricerca web ed estrazione di pagine tramite Tavily, se configurato `TAVILY_API_KEY`.
 - Subagent e agenti custom definiti nel workspace; `AGENTS.md` viene aggiunto al contesto quando presente.
